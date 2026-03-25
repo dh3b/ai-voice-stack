@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  wakeword:
+    build:
+      context: ./wakeword
+      dockerfile: Dockerfile
+    container_name: voice_assistant_wakeword
+    environment:
+      - WAKEWORD_MODEL_PATH=${WAKEWORD_MODEL_PATH:-/models/wakeword}
+      - WAKEWORD_THRESHOLD=${WAKEWORD_THRESHOLD:-0.5}
+      - WAKEWORD_PHRASE=${WAKEWORD_PHRASE:-hey_jarvis}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
+      - AUDIO_CHANNELS=${AUDIO_CHANNELS:-1}
+      - AUDIO_CHUNK_SIZE=${AUDIO_CHUNK_SIZE:-1280}
+    volumes:
+      - ./models/wakeword:/models/wakeword:ro
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    networks:
+      - voice_assistant
+
+  stt:
+    build:
+      context: ./stt
+      dockerfile: Dockerfile
+    container_name: voice_assistant_stt
+    environment:
+      - STT_MODEL_PATH=${STT_MODEL_PATH:-/models/stt}
+      - STT_MODEL_SIZE=${STT_MODEL_SIZE:-base}
+      - STT_LANGUAGE=${STT_LANGUAGE:-en}
+      - STT_DEVICE=${STT_DEVICE:-cpu}
+      - STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-int8}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
+    volumes:
+      - ./models/stt:/models/stt:ro
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
+    networks:
+      - voice_assistant
+
+  llm:
+    build:
+      context: ./llm
+      dockerfile: Dockerfile
+    container_name: voice_assistant_llm
+    environment:
+      - LLM_MODEL_PATH=${LLM_MODEL_PATH:-/models/llm/model.gguf}
+      - LLM_CONTEXT_SIZE=${LLM_CONTEXT_SIZE:-4096}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
+      - LLM_TOP_P=${LLM_TOP_P:-0.9}
+      - LLM_TOP_K=${LLM_TOP_K:-40}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-512}
+      - LLM_N_GPU_LAYERS=${LLM_N_GPU_LAYERS:-0}
+      - LLM_N_THREADS=${LLM_N_THREADS:-4}
+      - LLM_AGENT_MODE=${LLM_AGENT_MODE:-true}
+      - LLM_SYSTEM_PROMPT=${LLM_SYSTEM_PROMPT:-You are a helpful voice assistant.}
+    volumes:
+      - ./models/llm:/models/llm:ro
+    ports:
+      - "8003:8003"
+    restart: unless-stopped
+    networks:
+      - voice_assistant
+
+  tts:
+    build:
+      context: ./tts
+      dockerfile: Dockerfile
+    container_name: voice_assistant_tts
+    environment:
+      - TTS_MODEL_PATH=${TTS_MODEL_PATH:-/models/tts}
+      - TTS_VOICE=${TTS_VOICE:-en_US-lessac-medium}
+      - TTS_SPEAKER_ID=${TTS_SPEAKER_ID:-0}
+      - TTS_SAMPLE_RATE=${TTS_SAMPLE_RATE:-22050}
+      - TTS_NOISE_SCALE=${TTS_NOISE_SCALE:-0.667}
+      - TTS_LENGTH_SCALE=${TTS_LENGTH_SCALE:-1.0}
+    volumes:
+      - ./models/tts:/models/tts:ro
+      - ./orchestrator/app/assets/confirmations:/app/confirmations
+    ports:
+      - "8004:8004"
+    restart: unless-stopped
+    networks:
+      - voice_assistant
+
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: voice_assistant_orchestrator
+    environment:
+      - WAKEWORD_SERVICE_URL=${WAKEWORD_SERVICE_URL:-http://wakeword:8001}
+      - STT_SERVICE_URL=${STT_SERVICE_URL:-http://stt:8002}
+      - LLM_SERVICE_URL=${LLM_SERVICE_URL:-http://llm:8003}
+      - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts:8004}
+      - AUDIO_INPUT_DEVICE=${AUDIO_INPUT_DEVICE:-auto}
+      - AUDIO_OUTPUT_DEVICE=${AUDIO_OUTPUT_DEVICE:-auto}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
+      - AUDIO_CHANNELS=${AUDIO_CHANNELS:-1}
+      - CHAT_CONTINUATION_ENABLED=${CHAT_CONTINUATION_ENABLED:-true}
+      - CHAT_CONTINUATION_TIMEOUT=${CHAT_CONTINUATION_TIMEOUT:-5.0}
+      - SILENCE_THRESHOLD=${SILENCE_THRESHOLD:-0.01}
+      - SILENCE_DURATION=${SILENCE_DURATION:-1.5}
+      - MAX_RECORDING_DURATION=${MAX_RECORDING_DURATION:-30.0}
+    volumes:
+      - ./orchestrator/app/assets:/app/assets
+    devices:
+      - /dev/snd:/dev/snd
+    privileged: true
+    depends_on:
+      - wakeword
+      - stt
+      - llm
+      - tts
+    restart: unless-stopped
+    networks:
+      - voice_assistant
+
+networks:
+  voice_assistant:
+    driver: bridge

@@ -1,0 +1,4 @@
+aiohttp==3.9.1
+sounddevice==0.4.6
+soundfile==0.12.1
+numpy==1.24.3

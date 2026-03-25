@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.env
+*.log
+models/
+orchestrator/app/assets/confirmations/*.wav
+.DS_Store
+.vscode

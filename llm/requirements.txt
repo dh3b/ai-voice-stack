@@ -1,0 +1,4 @@
+aiohttp==3.9.1
+llama-cpp-python
+llama-cpp-agent==0.2.8
+numpy==1.24.3
