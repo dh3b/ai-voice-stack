@@ -9,6 +9,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11-dev \
     python3-pip \
     ffmpeg \
+    pkg-config \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
