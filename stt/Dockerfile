@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11-dev \
     python3-pip \
     ffmpeg \
+    build-essential \
+    gcc \
+    g++ \
     pkg-config \
     libavcodec-dev \
     libavformat-dev \
