@@ -1,13 +1,12 @@
 import os
 import logging
 import json
+import asyncio
 from aiohttp import web
 from llama_cpp import Llama
-from llama_cpp_agent import LlamaCppAgent
+from llama_cpp_agent import FunctionCallingAgent, LlamaCppFunctionTool, MessagesFormatterType
 from llama_cpp_agent.providers import LlamaCppPythonProvider
 from llama_cpp_agent.chat_history import BasicChatHistory
-from llama_cpp_agent.chat_history.messages import Roles
-from llama_cpp_agent.llm_output_settings import LlmStructuredOutputSettings, LlmStructuredOutputType
 from typing import List, Dict, Any, Optional
 
 logging.basicConfig(level=logging.INFO)
@@ -40,146 +39,107 @@ class LLMService:
         # Create provider for llama-cpp-agent
         self.provider = LlamaCppPythonProvider(self.llama_model)
         
-        # Chat history storage (per session - simplified for now)
-        self.chat_histories: Dict[str, BasicChatHistory] = {}
-        
         logger.info("LLM model loaded successfully")
     
-    def _get_or_create_chat_history(self, session_id: str = "default") -> BasicChatHistory:
-        """Get or create chat history for session"""
-        if session_id not in self.chat_histories:
-            self.chat_histories[session_id] = BasicChatHistory()
-        return self.chat_histories[session_id]
-    
-    def _convert_tools_to_functions(self, tools: List[Dict[str, Any]]) -> List[callable]:
-        """Convert tool definitions to callable functions for llama-cpp-agent"""
-        functions = []
+    def _create_tool_from_spec(self, tool_spec: Dict[str, Any]) -> LlamaCppFunctionTool:
+        """Create a LlamaCppFunctionTool from a JSON spec"""
+        name = tool_spec.get("name")
+        description = tool_spec.get("description", "")
+        parameters = tool_spec.get("parameters", {})
         
-        for tool in tools:
-            tool_name = tool.get("name")
-            tool_description = tool.get("description", "")
-            parameters = tool.get("parameters", {})
-            
-            # Create a dynamic function with proper annotations
-            def create_tool_function(name: str, desc: str, params: Dict):
-                def tool_func(**kwargs) -> str:
-                    """Dynamic tool function"""
-                    # Return tool call instruction for orchestrator to execute
-                    return json.dumps({
-                        "tool_call": True,
-                        "name": name,
-                        "arguments": kwargs
-                    })
-                
-                # Set function metadata
-                tool_func.__name__ = name
-                tool_func.__doc__ = desc
-                
-                # Add parameter annotations
-                annotations = {}
-                for param_name, param_info in params.get("properties", {}).items():
-                    param_type = param_info.get("type", "string")
-                    if param_type == "integer":
-                        annotations[param_name] = int
-                    elif param_type == "number":
-                        annotations[param_name] = float
-                    elif param_type == "boolean":
-                        annotations[param_name] = bool
-                    else:
-                        annotations[param_name] = str
-                
-                annotations["return"] = str
-                tool_func.__annotations__ = annotations
-                
-                return tool_func
-            
-            functions.append(create_tool_function(tool_name, tool_description, parameters))
+        # Create a dynamic function with proper annotations
+        def tool_func(**kwargs) -> str:
+            """Dynamic tool function stub that will be intercepted by the orchestrator"""
+            return json.dumps({
+                "tool_call": True,
+                "name": name,
+                "arguments": kwargs
+            })
         
-        return functions
-    
+        tool_func.__name__ = name
+        tool_func.__doc__ = description
+        
+        # Add parameter annotations
+        annotations = {}
+        for param_name, param_info in parameters.get("properties", {}).items():
+            param_type = param_info.get("type", "string")
+            if param_type == "integer":
+                annotations[param_name] = int
+            elif param_type == "number":
+                annotations[param_name] = float
+            elif param_type == "boolean":
+                annotations[param_name] = bool
+            else:
+                annotations[param_name] = str
+        
+        annotations["return"] = str
+        tool_func.__annotations__ = annotations
+        
+        return LlamaCppFunctionTool(tool_func)
+
     async def generate(self, request):
-        """Generate LLM response"""
+        """Generate LLM response using FunctionCallingAgent"""
         try:
             data = await request.json()
             user_text = data.get("text", "")
-            tools = data.get("tools", [])
+            tools_specs = data.get("tools", [])
             stream = data.get("stream", False)
-            session_id = data.get("session_id", "default")
             
-            # Get chat history
-            chat_history = self._get_or_create_chat_history(session_id)
+            logger.info(f"Generating response for: {user_text}")
             
-            # Add user message to history
-            chat_history.add_message(Roles.user, user_text)
+            # Prepare tools
+            function_tools = [self._create_tool_from_spec(spec) for spec in tools_specs]
             
-            # Convert tools to functions if in agent mode
-            tool_functions = None
-            if self.agent_mode and tools:
-                tool_functions = self._convert_tools_to_functions(tools)
-            
-            # Create agent
-            agent = LlamaCppAgent(
+            # We create a new agent instance per request to handle statelessness if needed, 
+            # or we could cache it. For voice, usually it's one turn at a time.
+            agent = FunctionCallingAgent(
                 self.provider,
+                llama_cpp_function_tools=function_tools,
                 system_prompt=self.system_prompt,
-                predefined_messages_formatter_type=None,  # Auto-detect from model
-                debug_output=False
+                allow_parallel_function_calling=True,
+                messages_formatter_type=MessagesFormatterType.LLAMA_3,
             )
             
             if stream:
-                return await self._stream_response(request, agent, chat_history, user_text, tool_functions)
+                return await self._stream_response(request, agent, user_text)
             else:
-                return await self._complete_response(agent, chat_history, user_text, tool_functions)
+                chat_history = BasicChatHistory()
+                response_text = agent.get_chat_response(user_text, chat_history=chat_history)
+                return web.json_response({
+                    "text": response_text.strip()
+                })
                 
         except Exception as e:
             logger.error(f"Generation error: {e}", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
     
-    async def _stream_response(self, request, agent: LlamaCppAgent, chat_history: BasicChatHistory, 
-                               user_text: str, tool_functions: Optional[List[callable]]):
-        """Stream response tokens using llama-cpp-agent"""
+    async def _stream_response(self, request, agent: FunctionCallingAgent, user_text: str):
+        """Stream response tokens or tool calls"""
         response = web.StreamResponse()
         response.headers['Content-Type'] = 'text/event-stream'
         response.headers['Cache-Control'] = 'no-cache'
         await response.prepare(request)
         
         try:
-            # Generate with streaming
-            if tool_functions:
-                # Agent mode with tools
-                result = agent.get_chat_response(
-                    user_text,
-                    chat_history=chat_history,
-                    temperature=self.temperature,
-                    top_p=self.top_p,
-                    top_k=self.top_k,
-                    max_tokens=self.max_tokens,
-                    tools=tool_functions,
-                    stream=True
-                )
-            else:
-                # Chat mode without tools
-                result = agent.get_chat_response(
-                    user_text,
-                    chat_history=chat_history,
-                    temperature=self.temperature,
-                    top_p=self.top_p,
-                    top_k=self.top_k,
-                    max_tokens=self.max_tokens,
-                    stream=True
-                )
+            # Use get_chat_response for streaming support
+            chat_history = BasicChatHistory()
+            result = agent.get_chat_response(
+                user_text,
+                chat_history=chat_history,
+                temperature=self.temperature,
+                top_p=self.top_p,
+                top_k=self.top_k,
+                max_tokens=self.max_tokens,
+                stream=True
+            )
             
-            # Stream tokens
-            full_response = ""
+            # The result is a generator yielding chunks or tool calls
             for chunk in result:
                 if isinstance(chunk, str):
-                    full_response += chunk
                     await response.write(f"data: {chunk}\n\n".encode('utf-8'))
                 elif isinstance(chunk, dict):
-                    # Tool call result
+                    # Tool call or metadata
                     await response.write(f"data: TOOL_CALL:{json.dumps(chunk)}\n\n".encode('utf-8'))
-            
-            # Add assistant response to history
-            chat_history.add_message(Roles.assistant, full_response)
             
             await response.write(b"data: [DONE]\n\n")
             
@@ -190,60 +150,7 @@ class LLMService:
             await response.write_eof()
         
         return response
-    
-    async def _complete_response(self, agent: LlamaCppAgent, chat_history: BasicChatHistory,
-                                 user_text: str, tool_functions: Optional[List[callable]]):
-        """Generate complete response using llama-cpp-agent"""
-        try:
-            # Generate response
-            if tool_functions:
-                # Agent mode with tools
-                result = agent.get_chat_response(
-                    user_text,
-                    chat_history=chat_history,
-                    temperature=self.temperature,
-                    top_p=self.top_p,
-                    top_k=self.top_k,
-                    max_tokens=self.max_tokens,
-                    tools=tool_functions
-                )
-            else:
-                # Chat mode without tools
-                result = agent.get_chat_response(
-                    user_text,
-                    chat_history=chat_history,
-                    temperature=self.temperature,
-                    top_p=self.top_p,
-                    top_k=self.top_k,
-                    max_tokens=self.max_tokens
-                )
-            
-            # Add assistant response to history
-            chat_history.add_message(Roles.assistant, result)
-            
-            return web.json_response({
-                "text": result,
-                "session_id": "default"
-            })
-            
-        except Exception as e:
-            logger.error(f"Complete response error: {e}", exc_info=True)
-            return web.json_response({"error": str(e)}, status=500)
-    
-    async def clear_history(self, request):
-        """Clear chat history for a session"""
-        try:
-            data = await request.json()
-            session_id = data.get("session_id", "default")
-            
-            if session_id in self.chat_histories:
-                del self.chat_histories[session_id]
-            
-            return web.json_response({"status": "cleared", "session_id": session_id})
-        except Exception as e:
-            logger.error(f"Clear history error: {e}")
-            return web.json_response({"error": str(e)}, status=500)
-    
+
     async def health(self, request):
         return web.json_response({"status": "healthy"})
 
@@ -252,7 +159,6 @@ async def create_app():
     service = LLMService()
     
     app.router.add_post('/generate', service.generate)
-    app.router.add_post('/clear_history', service.clear_history)
     app.router.add_get('/health', service.health)
     
     return app

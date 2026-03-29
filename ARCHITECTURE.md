@@ -115,15 +115,20 @@ The AI Voice Assistant uses a microservices architecture where each component ru
 
 ## Streaming Implementation
 
-### LLM → TTS Streaming
-1. LLM generates tokens one at a time
-2. Tokens sent via Server-Sent Events (SSE)
-3. TTS accumulates tokens until sentence boundary
-4. TTS synthesizes complete sentences
-5. Audio chunks streamed to orchestrator
-6. Orchestrator plays audio immediately
+### Orchestrator Pipeline (Parallel)
+The orchestrator implements a true asynchronous streaming pipeline to minimize latency:
 
-This reduces perceived latency from seconds to milliseconds.
+1. **Capture & Transcribe**: Standard recording/STT turn until text is available.
+2. **LLM Generation (Task 1)**: The LLM streams tokens (and tool calls) via SSE.
+3. **Sentence Buffering**: A regex-based parser extracts complete sentences from the token stream.
+4. **TTS Synthesis (Task 2)**: An independent task consumes sentences from a queue and sends them to the TTS service.
+5. **Playback Worker (Task 3)**: A final consumer task takes audio buffers and plays them sequentially using a non-blocking queue.
+
+This parallel architecture allows the assistant to start speaking as soon as the first sentence is generated, while the LLM is still finishing the rest of the response.
+
+### Tool & Chat Continuation
+- **Tool Calling**: Managed by `llama-cpp-agent` and intercepted for execution.
+- **Continual Listening**: After response completion, the system monitors for follow-up speech within a specified window.
 
 ## Cancellation Mechanism
 
