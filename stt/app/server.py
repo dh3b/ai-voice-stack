@@ -1,88 +1,82 @@
 import os
 import logging
+
 import numpy as np
-import tempfile
 from aiohttp import web
 from faster_whisper import WhisperModel
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("stt")
+
 
 class STTService:
     def __init__(self):
-        self.model_path = os.getenv("STT_MODEL_PATH", "/models/stt")
-        self.model_size = os.getenv("STT_MODEL_SIZE", "base")
-        self.language = os.getenv("STT_LANGUAGE", "en")
-        self.device = os.getenv("STT_DEVICE", "cpu")
-        self.compute_type = os.getenv("STT_COMPUTE_TYPE", "int8")
-        self.sample_rate = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))
-        
-        logger.info(f"Loading Whisper model: {self.model_size}")
-        
-        # Try to load from custom path, fallback to model size
-        try:
-            if os.path.exists(self.model_path) and os.path.isdir(self.model_path):
-                self.model = WhisperModel(
-                    self.model_path,
-                    device=self.device,
-                    compute_type=self.compute_type
-                )
-            else:
-                self.model = WhisperModel(
-                    self.model_size,
-                    device=self.device,
-                    compute_type=self.compute_type
-                )
-        except Exception as e:
-            logger.warning(f"Failed to load from path, using model size: {e}")
-            self.model = WhisperModel(
-                self.model_size,
-                device=self.device,
-                compute_type=self.compute_type
-            )
-        
-        logger.info("STT model loaded successfully")
-    
-    async def transcribe(self, request):
-        """Transcribe audio to text"""
+        self.model_path = os.getenv("WHISPER_MODEL_PATH", "/models/whisper/")
+        self.language = os.getenv("WHISPER_LANGUAGE", "en")
+        self.device = os.getenv("WHISPER_DEVICE", "cpu")
+        self.compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+
+        logger.info(
+            "Loading Whisper  path=%s  device=%s  compute_type=%s",
+            self.model_path, self.device, self.compute_type,
+        )
+        self.model = WhisperModel(
+            self.model_path,
+            device=self.device,
+            compute_type=self.compute_type,
+        )
+        logger.info("Whisper ready")
+
+    async def transcribe(self, request: web.Request) -> web.Response:
         try:
             audio_bytes = await request.read()
-            audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32767.0
-            
-            # Transcribe
+            # Orchestrator sends float32 audio bytes
+            audio = np.frombuffer(audio_bytes, dtype=np.float32)
+
+            logger.info("Transcribing %.2f s of audio", len(audio) / 16000)
+
             segments, info = self.model.transcribe(
-                audio_array,
+                audio,
                 language=self.language,
                 beam_size=5,
-                vad_filter=True
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 500},
             )
-            
-            # Collect text
-            text = " ".join([segment.text for segment in segments]).strip()
-            
-            logger.info(f"Transcribed: {text}")
-            
+
+            text = " ".join(seg.text.strip() for seg in segments).strip()
+
+            logger.info(
+                "Transcription [lang=%s  prob=%.2f]: '%s'",
+                info.language, info.language_probability, text or "<empty>",
+            )
+
             return web.json_response({
                 "text": text,
                 "language": info.language,
-                "language_probability": info.language_probability
+                "language_probability": info.language_probability,
             })
-            
+
         except Exception as e:
-            logger.error(f"Transcription error: {e}")
+            logger.error("Transcription error: %s", e)
             return web.json_response({"error": str(e)}, status=500)
-    
-    async def health(self, request):
+
+    async def health(self, _request: web.Request) -> web.Response:
         return web.json_response({"status": "healthy"})
 
-async def create_app():
-    app = web.Application(client_max_size=50*1024*1024)  # 50MB max
+
+async def create_app() -> web.Application:
+    app = web.Application(client_max_size=50 * 1024 * 1024)  # 50 MB
     service = STTService()
-    
-    app.router.add_post('/transcribe', service.transcribe)
-    app.router.add_get('/health', service.health)
-    
+
+    app.router.add_post("/transcribe", service.transcribe)
+    app.router.add_get("/health", service.health)
+
     return app
 
-if __name__ == '__main__':
-    web.run_app(create_app(), host='0.0.0.0', port=8002)
+
+if __name__ == "__main__":
+    web.run_app(create_app(), host="0.0.0.0", port=8002)

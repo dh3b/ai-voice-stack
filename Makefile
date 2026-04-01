@@ -1,4 +1,4 @@
-.PHONY: build up down logs clean restart
+.PHONY: build up down logs clean restart health
 
 build:
 	docker-compose build
@@ -14,14 +14,14 @@ logs:
 
 clean:
 	docker-compose down -v
-	rm -rf orchestrator/app/assets/confirmations/*.wav
+	rm -rf orchestrator/assets/confirmations/*.wav
 
 restart:
 	docker-compose restart
 
 health:
 	@echo "Checking service health..."
-	@curl -s http://localhost:8001/health || echo "Wakeword: DOWN"
-	@curl -s http://localhost:8002/health || echo "STT: DOWN"
-	@curl -s http://localhost:8003/health || echo "LLM: DOWN"
-	@curl -s http://localhost:8004/health || echo "TTS: DOWN"
+	@curl -sf http://localhost:8001/health && echo " Wakeword: OK" || echo " Wakeword: DOWN"
+	@curl -sf http://localhost:8002/health && echo " STT: OK"      || echo " STT: DOWN"
+	@curl -sf http://localhost:8003/health && echo " LLM: OK"      || echo " LLM: DOWN"
+	@curl -sf http://localhost:8004/health && echo " TTS: OK"      || echo " TTS: DOWN"

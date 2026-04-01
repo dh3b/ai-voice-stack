@@ -1,1 +1,1 @@
-# Wakeword service module
+# Wakeword service

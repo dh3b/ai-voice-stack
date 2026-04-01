@@ -1,152 +1,92 @@
-import os
-import logging
+"""
+TTS service using PiperVoice Python API.
+
+Endpoint:
+  POST /synthesize  — JSON {"text": "..."} -> WAV audio bytes
+  GET  /health
+"""
+
 import io
+import logging
+import os
 import wave
+
 from aiohttp import web
 from piper import PiperVoice
-import numpy as np
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("tts")
+
 
 class TTSService:
     def __init__(self):
-        self.model_path = os.getenv("TTS_MODEL_PATH", "/models/tts")
-        self.voice = os.getenv("TTS_VOICE", "en_US-lessac-medium")
+        self.model_dir = os.getenv("TTS_MODEL_PATH", "/models/tts")
+        self.voice_name = os.getenv("TTS_VOICE", "en_US-lessac-medium")
         self.speaker_id = int(os.getenv("TTS_SPEAKER_ID", "0"))
-        self.sample_rate = int(os.getenv("TTS_SAMPLE_RATE", "22050"))
         self.noise_scale = float(os.getenv("TTS_NOISE_SCALE", "0.667"))
         self.length_scale = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))
-        
-        logger.info(f"Loading TTS model: {self.voice}")
-        
-        # Load Piper voice
-        model_file = os.path.join(self.model_path, f"{self.voice}.onnx")
-        config_file = os.path.join(self.model_path, f"{self.voice}.onnx.json")
-        
-        if os.path.exists(model_file):
-            self.voice_model = PiperVoice.load(model_file, config_file)
-            logger.info("TTS model loaded successfully")
-        else:
-            logger.warning(f"Model file not found: {model_file}")
-            self.voice_model = None
-    
-    async def synthesize(self, request):
-        """Synthesize speech from text"""
+
+        model_file = os.path.join(self.model_dir, f"{self.voice_name}.onnx")
+        config_file = os.path.join(self.model_dir, f"{self.voice_name}.onnx.json")
+
+        logger.info("Loading TTS  model=%s", model_file)
+
+        if not os.path.exists(model_file):
+            raise FileNotFoundError(f"TTS model not found: {model_file}")
+
+        config_path = config_file if os.path.exists(config_file) else None
+        self.voice = PiperVoice.load(model_file, config_path)
+        logger.info("TTS ready")
+
+    async def synthesize(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
-            text = data.get("text", "")
-            
+            text = data.get("text", "").strip()
+
             if not text:
                 return web.json_response({"error": "No text provided"}, status=400)
-            
-            if not self.voice_model:
-                return web.json_response({"error": "TTS model not loaded"}, status=500)
-            
-            # Synthesize
-            audio_stream = io.BytesIO()
-            
-            with wave.open(audio_stream, 'wb') as wav_file:
-                self.voice_model.synthesize(
+
+            logger.info("TTS <- '%s'", text)
+
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wav_file:
+                self.voice.synthesize(
                     text,
                     wav_file,
                     speaker_id=self.speaker_id,
                     length_scale=self.length_scale,
-                    noise_scale=self.noise_scale
+                    noise_scale=self.noise_scale,
                 )
-            
-            audio_stream.seek(0)
-            audio_data = audio_stream.read()
-            
+
+            wav_bytes = buf.getvalue()
+            logger.info("TTS -> %d bytes", len(wav_bytes))
+
             return web.Response(
-                body=audio_data,
-                content_type='audio/wav',
-                headers={'Content-Disposition': 'attachment; filename="speech.wav"'}
+                body=wav_bytes,
+                content_type="audio/wav",
             )
-            
+
         except Exception as e:
-            logger.error(f"Synthesis error: {e}")
+            logger.error("Synthesis error: %s", e)
             return web.json_response({"error": str(e)}, status=500)
-    
-    async def synthesize_stream(self, request):
-        """Stream synthesis for real-time TTS"""
-        response = web.StreamResponse()
-        response.headers['Content-Type'] = 'audio/wav'
-        await response.prepare(request)
-        
-        try:
-            # Read streaming text input
-            text_buffer = ""
-            sentence_endings = ['.', '!', '?', '\n']
-            
-            async for chunk in request.content.iter_any():
-                if not chunk:
-                    break
-                
-                text_buffer += chunk.decode('utf-8')
-                
-                # Process complete sentences
-                while any(ending in text_buffer for ending in sentence_endings):
-                    # Find first sentence ending
-                    min_idx = len(text_buffer)
-                    for ending in sentence_endings:
-                        idx = text_buffer.find(ending)
-                        if idx != -1 and idx < min_idx:
-                            min_idx = idx
-                    
-                    if min_idx < len(text_buffer):
-                        sentence = text_buffer[:min_idx + 1].strip()
-                        text_buffer = text_buffer[min_idx + 1:]
-                        
-                        if sentence and self.voice_model:
-                            # Synthesize sentence
-                            audio_stream = io.BytesIO()
-                            with wave.open(audio_stream, 'wb') as wav_file:
-                                self.voice_model.synthesize(
-                                    sentence,
-                                    wav_file,
-                                    speaker_id=self.speaker_id,
-                                    length_scale=self.length_scale,
-                                    noise_scale=self.noise_scale
-                                )
-                            
-                            audio_stream.seek(0)
-                            await response.write(audio_stream.read())
-            
-            # Process remaining text
-            if text_buffer.strip() and self.voice_model:
-                audio_stream = io.BytesIO()
-                with wave.open(audio_stream, 'wb') as wav_file:
-                    self.voice_model.synthesize(
-                        text_buffer.strip(),
-                        wav_file,
-                        speaker_id=self.speaker_id,
-                        length_scale=self.length_scale,
-                        noise_scale=self.noise_scale
-                    )
-                
-                audio_stream.seek(0)
-                await response.write(audio_stream.read())
-            
-        except Exception as e:
-            logger.error(f"Streaming synthesis error: {e}")
-        finally:
-            await response.write_eof()
-        
-        return response
-    
-    async def health(self, request):
+
+    async def health(self, _request: web.Request) -> web.Response:
         return web.json_response({"status": "healthy"})
 
-async def create_app():
+
+async def create_app() -> web.Application:
     app = web.Application()
     service = TTSService()
-    
-    app.router.add_post('/synthesize', service.synthesize)
-    app.router.add_post('/synthesize_stream', service.synthesize_stream)
-    app.router.add_get('/health', service.health)
-    
+
+    app.router.add_post("/synthesize", service.synthesize)
+    app.router.add_get("/health", service.health)
+
     return app
 
-if __name__ == '__main__':
-    web.run_app(create_app(), host='0.0.0.0', port=8004)
+
+if __name__ == "__main__":
+    web.run_app(create_app(), host="0.0.0.0", port=8004)

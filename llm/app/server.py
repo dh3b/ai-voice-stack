@@ -1,167 +1,216 @@
-import os
-import logging
+"""
+LLM service: llama-cpp-python + llama-cpp-agent.
+
+Exposes two inference endpoints:
+  POST /chat   — agent mode (tool calling via llama-cpp-agent), returns full JSON
+  POST /stream — streaming mode (token-by-token SSE via llama-cpp-python)
+  POST /reset  — clear conversation history
+  GET  /health
+"""
+
+from __future__ import annotations
+
 import json
-import asyncio
+import logging
+import os
+from typing import Any, List, Optional
+
 from aiohttp import web
 from llama_cpp import Llama
-from llama_cpp_agent import FunctionCallingAgent, LlamaCppFunctionTool, MessagesFormatterType
+from llama_cpp_agent import (
+    FunctionCallingAgent,
+    LlamaCppFunctionTool,
+    MessagesFormatterType,
+)
 from llama_cpp_agent.providers import LlamaCppPythonProvider
-from llama_cpp_agent.chat_history import BasicChatHistory
-from typing import List, Dict, Any, Optional
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from app.tools import default_registry
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("llm")
+
 
 class LLMService:
     def __init__(self):
         self.model_path = os.getenv("LLM_MODEL_PATH", "/models/llm/model.gguf")
-        self.context_size = int(os.getenv("LLM_CONTEXT_SIZE", "4096"))
-        self.temperature = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-        self.top_p = float(os.getenv("LLM_TOP_P", "0.9"))
-        self.top_k = int(os.getenv("LLM_TOP_K", "40"))
-        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
-        self.n_gpu_layers = int(os.getenv("LLM_N_GPU_LAYERS", "0"))
-        self.n_threads = int(os.getenv("LLM_N_THREADS", "4"))
-        self.agent_mode = os.getenv("LLM_AGENT_MODE", "true").lower() == "true"
-        self.system_prompt = os.getenv("LLM_SYSTEM_PROMPT", "You are a helpful voice assistant.")
-        
-        logger.info(f"Loading LLM model: {self.model_path}")
-        
-        # Initialize llama-cpp model
-        self.llama_model = Llama(
-            model_path=self.model_path,
-            n_ctx=self.context_size,
-            n_gpu_layers=self.n_gpu_layers,
-            n_threads=self.n_threads,
-            verbose=False
+        self.system_prompt = os.getenv(
+            "LLM_SYSTEM_PROMPT",
+            "You are a helpful AI voice assistant. Be concise and clear.",
         )
-        
-        # Create provider for llama-cpp-agent
-        self.provider = LlamaCppPythonProvider(self.llama_model)
-        
-        logger.info("LLM model loaded successfully")
-    
-    def _create_tool_from_spec(self, tool_spec: Dict[str, Any]) -> LlamaCppFunctionTool:
-        """Create a LlamaCppFunctionTool from a JSON spec"""
-        name = tool_spec.get("name")
-        description = tool_spec.get("description", "")
-        parameters = tool_spec.get("parameters", {})
-        
-        # Create a dynamic function with proper annotations
-        def tool_func(**kwargs) -> str:
-            """Dynamic tool function stub that will be intercepted by the orchestrator"""
-            return json.dumps({
-                "tool_call": True,
-                "name": name,
-                "arguments": kwargs
-            })
-        
-        tool_func.__name__ = name
-        tool_func.__doc__ = description
-        
-        # Add parameter annotations
-        annotations = {}
-        for param_name, param_info in parameters.get("properties", {}).items():
-            param_type = param_info.get("type", "string")
-            if param_type == "integer":
-                annotations[param_name] = int
-            elif param_type == "number":
-                annotations[param_name] = float
-            elif param_type == "boolean":
-                annotations[param_name] = bool
-            else:
-                annotations[param_name] = str
-        
-        annotations["return"] = str
-        tool_func.__annotations__ = annotations
-        
-        return LlamaCppFunctionTool(tool_func)
+        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
+        self.temperature = float(os.getenv("LLM_TEMPERATURE", "0.8"))
+        self.n_ctx = int(os.getenv("LLM_N_CTX", "4096"))
+        self.n_threads = int(os.getenv("LLM_N_THREADS", "6"))
+        self.top_p = float(os.getenv("LLM_TOP_P", "0.95"))
+        self.agent_enabled = os.getenv("AGENT_ENABLED", "false").lower() == "true"
 
-    async def generate(self, request):
-        """Generate LLM response using FunctionCallingAgent"""
+        # Conversation history for streaming (non-agent) mode
+        self.history: list[dict[str, str]] = []
+
+        # Load model
+        logger.info(
+            "Loading LLM  path=%s  n_ctx=%d  threads=%d",
+            self.model_path, self.n_ctx, self.n_threads,
+        )
+        self.model = Llama(
+            model_path=self.model_path,
+            n_ctx=self.n_ctx,
+            n_threads=self.n_threads,
+            verbose=False,
+        )
+        logger.info("LLM ready")
+
+        # Set up agent (if enabled)
+        self._agent: Optional[FunctionCallingAgent] = None
+        if self.agent_enabled:
+            self._setup_agent()
+
+    def _setup_agent(self) -> None:
+        registry = default_registry()
+        provider = LlamaCppPythonProvider(self.model)
+
+        function_tools: List[LlamaCppFunctionTool] = [
+            LlamaCppFunctionTool(spec.func) for spec in registry.all()
+        ]
+
+        def _send_message_callback(message: str, **_kwargs: Any) -> None:
+            text = (message or "").strip()
+            if text:
+                logger.info("Agent(message) -> %s", text)
+
+        self._agent = FunctionCallingAgent(
+            provider,
+            llama_cpp_function_tools=function_tools,
+            system_prompt=self.system_prompt,
+            allow_parallel_function_calling=True,
+            send_message_to_user_callback=_send_message_callback,
+            messages_formatter_type=MessagesFormatterType.LLAMA_3,
+        )
+        logger.info("Agent ready with %d tools", len(function_tools))
+
+    # ── /chat endpoint (agent mode) ──────────────────────────────────────────
+
+    async def chat(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
-            user_text = data.get("text", "")
-            tools_specs = data.get("tools", [])
-            stream = data.get("stream", False)
-            
-            logger.info(f"Generating response for: {user_text}")
-            
-            # Prepare tools
-            function_tools = [self._create_tool_from_spec(spec) for spec in tools_specs]
-            
-            # We create a new agent instance per request to handle statelessness if needed, 
-            # or we could cache it. For voice, usually it's one turn at a time.
-            agent = FunctionCallingAgent(
-                self.provider,
-                llama_cpp_function_tools=function_tools,
-                system_prompt=self.system_prompt,
-                allow_parallel_function_calling=True,
-                messages_formatter_type=MessagesFormatterType.LLAMA_3,
-            )
-            
-            if stream:
-                return await self._stream_response(request, agent, user_text)
+            user_text = data.get("text", "").strip()
+            if not user_text:
+                return web.json_response({"error": "No text provided"}, status=400)
+
+            logger.info("chat <- '%s'", user_text)
+
+            if self._agent is not None:
+                response_text = str(
+                    self._agent.generate_response(user_text)
+                ).strip()
             else:
-                chat_history = BasicChatHistory()
-                response_text = agent.get_chat_response(user_text, chat_history=chat_history)
-                return web.json_response({
-                    "text": response_text.strip()
-                })
-                
+                response_text = self._chat_plain(user_text)
+
+            logger.info("chat -> '%s'", response_text)
+            return web.json_response({"text": response_text})
+
         except Exception as e:
-            logger.error(f"Generation error: {e}", exc_info=True)
+            logger.error("Chat error: %s", e, exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
-    
-    async def _stream_response(self, request, agent: FunctionCallingAgent, user_text: str):
-        """Stream response tokens or tool calls"""
+
+    def _chat_plain(self, user_text: str) -> str:
+        """Non-streaming, non-agent chat via llama-cpp-python directly."""
+        self.history.append({"role": "user", "content": user_text})
+
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            *self.history,
+        ]
+        response = self.model.create_chat_completion(
+            messages=messages,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            top_p=self.top_p,
+        )
+        reply = response["choices"][0]["message"]["content"].strip()
+        self.history.append({"role": "assistant", "content": reply})
+        return reply
+
+    # ── /stream endpoint (token-by-token SSE) ────────────────────────────────
+
+    async def stream(self, request: web.Request) -> web.StreamResponse:
         response = web.StreamResponse()
-        response.headers['Content-Type'] = 'text/event-stream'
-        response.headers['Cache-Control'] = 'no-cache'
+        response.headers["Content-Type"] = "text/event-stream"
+        response.headers["Cache-Control"] = "no-cache"
         await response.prepare(request)
-        
+
         try:
-            # Use get_chat_response for streaming support
-            chat_history = BasicChatHistory()
-            result = agent.get_chat_response(
-                user_text,
-                chat_history=chat_history,
+            data = await request.json()
+            user_text = data.get("text", "").strip()
+            if not user_text:
+                await response.write(b"data: ERROR:No text provided\n\n")
+                await response.write_eof()
+                return response
+
+            logger.info("stream <- '%s'", user_text)
+
+            self.history.append({"role": "user", "content": user_text})
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                *self.history,
+            ]
+
+            full_reply: list[str] = []
+
+            for chunk in self.model.create_chat_completion(
+                messages=messages,
+                max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 top_p=self.top_p,
-                top_k=self.top_k,
-                max_tokens=self.max_tokens,
-                stream=True
-            )
-            
-            # The result is a generator yielding chunks or tool calls
-            for chunk in result:
-                if isinstance(chunk, str):
-                    await response.write(f"data: {chunk}\n\n".encode('utf-8'))
-                elif isinstance(chunk, dict):
-                    # Tool call or metadata
-                    await response.write(f"data: TOOL_CALL:{json.dumps(chunk)}\n\n".encode('utf-8'))
-            
+                stream=True,
+            ):
+                token = chunk["choices"][0]["delta"].get("content", "")
+                if token:
+                    full_reply.append(token)
+                    await response.write(f"data: {token}\n\n".encode("utf-8"))
+
+            reply = "".join(full_reply).strip()
+            self.history.append({"role": "assistant", "content": reply})
+            logger.info("stream -> '%s'", reply)
+
             await response.write(b"data: [DONE]\n\n")
-            
+
         except Exception as e:
-            logger.error(f"Streaming error: {e}", exc_info=True)
-            await response.write(f"data: ERROR:{str(e)}\n\n".encode('utf-8'))
+            logger.error("Stream error: %s", e, exc_info=True)
+            await response.write(f"data: ERROR:{e}\n\n".encode("utf-8"))
         finally:
             await response.write_eof()
-        
+
         return response
 
-    async def health(self, request):
+    # ── /reset endpoint ──────────────────────────────────────────────────────
+
+    async def reset(self, _request: web.Request) -> web.Response:
+        self.history.clear()
+        logger.info("Conversation history cleared")
+        return web.json_response({"status": "cleared"})
+
+    # ── /health ──────────────────────────────────────────────────────────────
+
+    async def health(self, _request: web.Request) -> web.Response:
         return web.json_response({"status": "healthy"})
 
-async def create_app():
+
+async def create_app() -> web.Application:
     app = web.Application()
     service = LLMService()
-    
-    app.router.add_post('/generate', service.generate)
-    app.router.add_get('/health', service.health)
-    
+
+    app.router.add_post("/chat", service.chat)
+    app.router.add_post("/stream", service.stream)
+    app.router.add_post("/reset", service.reset)
+    app.router.add_get("/health", service.health)
+
     return app
 
-if __name__ == '__main__':
-    web.run_app(create_app(), host='0.0.0.0', port=8003)
+
+if __name__ == "__main__":
+    web.run_app(create_app(), host="0.0.0.0", port=8003)

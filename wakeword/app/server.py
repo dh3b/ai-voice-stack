@@ -1,58 +1,81 @@
 import os
 import logging
+
 import numpy as np
 from aiohttp import web
-import openwakeword
 from openwakeword.model import Model
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("wakeword")
+
 
 class WakewordService:
     def __init__(self):
-        self.model_path = os.getenv("WAKEWORD_MODEL_PATH", "/models/wakeword")
-        self.threshold = float(os.getenv("WAKEWORD_THRESHOLD", "0.5"))
-        self.phrase = os.getenv("WAKEWORD_PHRASE", "hey_jarvis")
-        self.sample_rate = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))
-        
-        # Initialize model
-        logger.info(f"Loading wakeword model: {self.phrase}")
-        self.model = Model(wakeword_models=[self.phrase], inference_framework='onnx')
-        
-    async def detect(self, request):
-        """Detect wakeword in audio chunk"""
+        self.model_path = os.getenv("WAKEWORD_MODEL_PATH", "")
+        self.threshold = float(os.getenv("WAKEWORD_THRESHOLD", "0.3"))
+        self.framework = os.getenv("WAKEWORD_FRAMEWORK", "onnx")
+
+        logger.info(
+            "Loading wake-word model  path=%s  framework=%s  threshold=%.2f",
+            self.model_path, self.framework, self.threshold,
+        )
+
+        # If model_path points to a file, load it directly.
+        # Otherwise treat it as a built-in model name (e.g. "hey_jarvis").
+        wakeword_models = [self.model_path] if self.model_path else []
+        self.model = Model(
+            wakeword_models=wakeword_models,
+            inference_framework=self.framework,
+        )
+        logger.info("Wake-word model ready")
+
+    async def detect(self, request: web.Request) -> web.Response:
         try:
             audio_bytes = await request.read()
-            audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32767.0
-            
-            # Predict
-            prediction = self.model.predict(audio_array)
-            
-            # Check if wakeword detected
+            # Orchestrator sends int16 bytes
+            pcm_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+
+            predictions: dict[str, float] = self.model.predict(pcm_int16)
+
             detected = False
-            for key, score in prediction.items():
+            for model_name, score in predictions.items():
                 if score >= self.threshold:
+                    logger.info(
+                        "Wake word detected  model=%s  score=%.3f",
+                        model_name, score,
+                    )
                     detected = True
-                    logger.info(f"Wakeword detected: {key} (score: {score})")
+                    self.model.reset()
                     break
-            
+
             return web.json_response({"detected": detected})
-            
+
         except Exception as e:
-            logger.error(f"Detection error: {e}")
+            logger.error("Detection error: %s", e)
             return web.json_response({"error": str(e)}, status=500)
-    
-    async def health(self, request):
+
+    async def reset(self, request: web.Request) -> web.Response:
+        self.model.reset()
+        return web.json_response({"status": "reset"})
+
+    async def health(self, _request: web.Request) -> web.Response:
         return web.json_response({"status": "healthy"})
 
-async def create_app():
+
+async def create_app() -> web.Application:
     app = web.Application()
     service = WakewordService()
-    
-    app.router.add_post('/detect', service.detect)
-    app.router.add_get('/health', service.health)
-    
+
+    app.router.add_post("/detect", service.detect)
+    app.router.add_post("/reset", service.reset)
+    app.router.add_get("/health", service.health)
+
     return app
 
-if __name__ == '__main__':
-    web.run_app(create_app(), host='0.0.0.0', port=8001)
+
+if __name__ == "__main__":
+    web.run_app(create_app(), host="0.0.0.0", port=8001)

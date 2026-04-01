@@ -1,3 +1,4 @@
-aiohttp==3.9.1
-openwakeword==0.5.1
-numpy==1.24.3
+aiohttp>=3.9
+openwakeword==0.6.0
+numpy==1.26.4
+onnxruntime==1.20.1

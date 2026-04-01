@@ -1,4 +1,3 @@
-aiohttp==3.9.1
-llama-cpp-python
+aiohttp>=3.9
 llama-cpp-agent>=0.2.35
 numpy==1.26.4

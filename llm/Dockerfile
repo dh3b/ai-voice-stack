@@ -4,6 +4,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Make nvcc findable if CUDA toolkit is mounted by the NVIDIA container runtime
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+
+# ── System deps ──────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-dev \
@@ -17,26 +22,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python  python  /usr/bin/python3.11 1 \
     && python3 -m pip install --upgrade pip setuptools wheel
+
+# ── llama-cpp-python (CUDA-aware) ─────────────────────────────────────────────
+# On Jetson with --runtime nvidia, /usr/local/cuda is bind-mounted.
+# We probe that path rather than `command -v nvcc`.
+RUN set -e; \
+    if [ -d /usr/local/cuda ] && [ -f /usr/local/cuda/bin/nvcc ]; then \
+    echo "CUDA detected — building llama-cpp-python with CUDA support"; \
+    CMAKE_ARGS="-DGGML_CUDA=ON -DGGML_NATIVE=ON" \
+    pip install llama-cpp-python --no-binary llama-cpp-python --no-cache-dir; \
+    else \
+    echo "CUDA not found — falling back to OpenBLAS (CPU) build"; \
+    CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DGGML_NATIVE=ON" \
+    FORCE_CMAKE=1 \
+    pip install llama-cpp-python --no-binary llama-cpp-python --no-cache-dir; \
+    fi
 
 WORKDIR /app
 
 COPY requirements.txt .
-
-RUN set -e; \
-    LLAMA_CMAKE_ARGS=""; \
-    if command -v nvcc >/dev/null 2>&1; then \
-        echo "CUDA detected — building llama-cpp-python with CUDA support"; \
-        LLAMA_CMAKE_ARGS="-DLLAMA_CUDA=ON -DLLAMA_NATIVE=ON"; \
-    elif pkg-config --exists openblas 2>/dev/null || [ -f /usr/lib/aarch64-linux-gnu/libopenblas.so ] || [ -f /usr/lib/x86_64-linux-gnu/libopenblas.so ]; then \
-        echo "OpenBLAS detected — building llama-cpp-python with OpenBLAS support"; \
-        LLAMA_CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS -DLLAMA_NATIVE=ON -DLLAMA_METAL=OFF"; \
-    else \
-        echo "No accelerator detected — building llama-cpp-python with baseline"; \
-        LLAMA_CMAKE_ARGS="-DLLAMA_NATIVE=ON -DLLAMA_METAL=OFF"; \
-    fi; \
-    CMAKE_ARGS="$LLAMA_CMAKE_ARGS" pip install llama-cpp-python --no-binary llama-cpp-python
-
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .

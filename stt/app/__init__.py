@@ -1,1 +1,1 @@
-# STT service module
+# STT service

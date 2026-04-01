@@ -1,27 +1,31 @@
 import asyncio
 import logging
+
 from app.pipeline import VoiceAssistantPipeline
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("orchestrator")
+
 
 async def main():
-    logger.info("Starting Voice Assistant Orchestrator...")
-    
+    logger.info("Starting Voice Assistant Orchestrator")
+
     pipeline = VoiceAssistantPipeline()
-    
+
     try:
         await pipeline.start()
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        logger.error("Fatal error: %s", e, exc_info=True)
     finally:
         await pipeline.stop()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
