@@ -57,7 +57,13 @@ class TTSService:
                 wav_file.setframerate(self.voice.config.sample_rate)
                 wav_file.setsampwidth(2)  # 16-bit
                 wav_file.setnchannels(1)  # mono
-                self.voice.synthesize(text, wav_file)
+                for audio_bytes in self.voice.synthesize_stream_raw(
+                    text,
+                    speaker_id=self.speaker_id,
+                    length_scale=self.length_scale,
+                    noise_scale=self.noise_scale,
+                ):
+                    wav_file.writeframes(audio_bytes)
 
             wav_bytes = buf.getvalue()
             logger.info("TTS -> %d bytes", len(wav_bytes))

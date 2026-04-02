@@ -183,7 +183,12 @@ class VoiceAssistantPipeline:
     def _read_chunk_sync(self) -> np.ndarray:
         """Read one chunk from the persistent input stream (blocking)."""
         chunk, _ = self._input_stream.read(self.config.AUDIO_CHUNK_SIZE)
-        return chunk.flatten().astype(np.float32)
+        # Downmix to mono if stereo (hardware may require >1 channel)
+        if chunk.ndim > 1 and chunk.shape[1] > 1:
+            chunk = chunk.mean(axis=1)
+        else:
+            chunk = chunk.flatten()
+        return chunk.astype(np.float32)
 
     async def _read_chunk(self) -> np.ndarray:
         return await asyncio.get_event_loop().run_in_executor(None, self._read_chunk_sync)
