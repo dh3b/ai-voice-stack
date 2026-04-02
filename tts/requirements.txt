@@ -1,2 +1,3 @@
 aiohttp>=3.9
 numpy==1.26.4
+pathvalidate==3.2.1
