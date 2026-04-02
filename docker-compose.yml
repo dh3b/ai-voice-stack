@@ -144,7 +144,7 @@ services:
       - AGENT_ENABLED=${AGENT_ENABLED:-false}
       - CONFIRMATION_PHRASES=${CONFIRMATION_PHRASES:-mhm,listening,go ahead}
     volumes:
-      - ./orchestrator/assets:/app/assets
+      - confirmations:/app/assets/confirmations
       - /run/asound:/run/asound:rw
     devices:
       - /dev/snd:/dev/snd
@@ -172,3 +172,6 @@ services:
 networks:
   voice_net:
     driver: bridge
+
+volumes:
+  confirmations:
