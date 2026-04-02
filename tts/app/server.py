@@ -1,18 +1,17 @@
 """
-TTS service using PiperVoice Python API.
+TTS service using piper CLI (subprocess).
 
 Endpoint:
   POST /synthesize  — JSON {"text": "..."} -> WAV audio bytes
   GET  /health
 """
 
-import io
+import asyncio
 import logging
 import os
-import wave
+import tempfile
 
 from aiohttp import web
-from piper import PiperVoice
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,21 +25,33 @@ class TTSService:
     def __init__(self):
         self.model_dir = os.getenv("TTS_MODEL_PATH", "/models/tts")
         self.voice_name = os.getenv("TTS_VOICE", "en_US-lessac-medium")
-        self.speaker_id = int(os.getenv("TTS_SPEAKER_ID", "0"))
-        self.noise_scale = float(os.getenv("TTS_NOISE_SCALE", "0.667"))
-        self.length_scale = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))
+        self.speaker_id = os.getenv("TTS_SPEAKER_ID", "0")
+        self.noise_scale = os.getenv("TTS_NOISE_SCALE", "0.667")
+        self.length_scale = os.getenv("TTS_LENGTH_SCALE", "1.0")
 
-        model_file = os.path.join(self.model_dir, f"{self.voice_name}.onnx")
+        self.model_file = os.path.join(self.model_dir, f"{self.voice_name}.onnx")
         config_file = os.path.join(self.model_dir, f"{self.voice_name}.onnx.json")
+        self.config_file = config_file if os.path.exists(config_file) else None
 
-        logger.info("Loading TTS  model=%s", model_file)
+        logger.info("Loading TTS  model=%s", self.model_file)
 
-        if not os.path.exists(model_file):
-            raise FileNotFoundError(f"TTS model not found: {model_file}")
+        if not os.path.exists(self.model_file):
+            raise FileNotFoundError(f"TTS model not found: {self.model_file}")
 
-        config_path = config_file if os.path.exists(config_file) else None
-        self.voice = PiperVoice.load(model_file, config_path)
         logger.info("TTS ready")
+
+    def _build_cmd(self, output_path: str) -> list[str]:
+        cmd = [
+            "piper",
+            "--model", self.model_file,
+            "--output_file", output_path,
+            "--speaker", self.speaker_id,
+            "--length_scale", self.length_scale,
+            "--noise_scale", self.noise_scale,
+        ]
+        if self.config_file:
+            cmd += ["--config", self.config_file]
+        return cmd
 
     async def synthesize(self, request: web.Request) -> web.Response:
         try:
@@ -52,20 +63,32 @@ class TTSService:
 
             logger.info("TTS <- '%s'", text)
 
-            buf = io.BytesIO()
-            with wave.open(buf, "wb") as wav_file:
-                wav_file.setframerate(self.voice.config.sample_rate)
-                wav_file.setsampwidth(2)  # 16-bit
-                wav_file.setnchannels(1)  # mono
-                for audio_bytes in self.voice.synthesize_stream_raw(
-                    text,
-                    speaker_id=self.speaker_id,
-                    length_scale=self.length_scale,
-                    noise_scale=self.noise_scale,
-                ):
-                    wav_file.writeframes(audio_bytes)
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
 
-            wav_bytes = buf.getvalue()
+            try:
+                cmd = self._build_cmd(tmp_path)
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate(input=text.encode("utf-8"))
+
+                if proc.returncode != 0:
+                    raise RuntimeError(
+                        f"Piper exited {proc.returncode}: {stderr.decode(errors='replace')}"
+                    )
+
+                with open(tmp_path, "rb") as f:
+                    wav_bytes = f.read()
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
             logger.info("TTS -> %d bytes", len(wav_bytes))
 
             return web.Response(
