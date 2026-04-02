@@ -54,6 +54,9 @@ class TTSService:
 
             buf = io.BytesIO()
             with wave.open(buf, "wb") as wav_file:
+                wav_file.setframerate(self.voice.config.sample_rate)
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setnchannels(1)  # mono
                 self.voice.synthesize(
                     text,
                     wav_file,

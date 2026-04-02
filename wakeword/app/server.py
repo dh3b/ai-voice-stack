@@ -12,6 +12,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("wakeword")
 
+# Suppress aiohttp access log spam from /detect polling
+logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
+
 
 class WakewordService:
     def __init__(self):
@@ -43,6 +46,16 @@ class WakewordService:
 
             detected = False
             for model_name, score in predictions.items():
+                # Log scores at DEBUG for diagnostics
+                logger.debug("predict  model=%s  score=%.4f", model_name, score)
+
+                # Log at INFO when score approaches threshold (>50% of threshold)
+                if score >= self.threshold * 0.5 and score < self.threshold:
+                    logger.info(
+                        "Near detection  model=%s  score=%.3f  threshold=%.2f",
+                        model_name, score, self.threshold,
+                    )
+
                 if score >= self.threshold:
                     logger.info(
                         "Wake word detected  model=%s  score=%.3f",

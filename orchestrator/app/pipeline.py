@@ -157,6 +157,9 @@ class VoiceAssistantPipeline:
                         with open(path, "wb") as f:
                             f.write(await resp.read())
                         logger.info("Generated confirmation: %s", phrase)
+                    else:
+                        body = await resp.text()
+                        logger.warning("TTS failed for confirmation '%s': %d %s", phrase, resp.status, body)
             except Exception as e:
                 logger.warning("Failed to generate confirmation '%s': %s", phrase, e)
 
