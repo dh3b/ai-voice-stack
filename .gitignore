@@ -1,0 +1,7 @@
+.venv
+.vscode
+.ruff_cache
+/models
+/temp
+/llama_cpp_bin
+__pycache__/

@@ -1,0 +1,137 @@
+import asyncio
+import sys
+from pathlib import Path
+from openai import AsyncOpenAI
+from typing import Literal
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # temporary
+from config import LLMClientConfig
+from modules.utility.tool_registry import registry
+
+
+class LLMClient:
+    def __init__(self, llm_client_config: LLMClientConfig, mode: Literal["agent", "chatbot"]):
+        self._config = llm_client_config
+        self._client = AsyncOpenAI(base_url="http://localhost:43001/v1", api_key="none")
+        self._mode = mode
+
+    async def run(self, user_message: str):
+        messages = [
+            {"role": "system", "content": self._config.system_instructions},
+            {"role": "user", "content": user_message},
+        ]
+
+        if self._mode == "agent":
+            await self._run_agent(messages)
+        elif self._mode == "chatbot":
+            await self._run_chatbot(messages)
+        else:
+            raise ValueError(f"Invalid mode: {self._mode}")
+
+    async def _run_chatbot(self, messages: str):
+        stream = await self._client.chat.completions.create(
+            model=self._config.chatbot_model_path,
+            messages=messages,
+            stream=True,
+            temperature=self._config.temperature,
+        )
+
+        async for event in stream:
+            chunk = event.choices[0].delta.content
+            if isinstance(chunk, str):
+                print(chunk, end="", flush=True)
+
+        print()
+
+    async def _run_agent(self, messages: str):
+        for it in range(self._config.max_iterations):
+            stream = await self._client.chat.completions.create(
+                model=self._config.agent_model_path,
+                messages=messages,
+                tools=registry.schemas(),
+                tool_choice="auto",
+                temperature=self._config.temperature,
+                stream=True,
+            )
+
+            response_content = ""
+            pending_tool_calls: dict[int, dict] = {}
+            finish_reason = None
+
+            async for event in stream:
+                choice = event.choices[0]
+                delta = choice.delta
+
+                if (
+                    delta.content is None
+                    and not delta.tool_calls
+                    and not choice.finish_reason
+                ):
+                    continue  # first event is null
+
+                if delta.content:
+                    response_content += delta.content
+                    print(delta.content, end="", flush=True)
+
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+
+                        if idx not in pending_tool_calls:
+                            pending_tool_calls[idx] = {
+                                "id": tc_delta.id,
+                                "name": tc_delta.function.name,
+                                "arguments": "",
+                            }
+
+                        if tc_delta.function and tc_delta.function.arguments:
+                            pending_tool_calls[idx]["arguments"] += tc_delta.function.arguments
+
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+                    break
+
+            # Newline after any streamed content.
+            if response_content:
+                print()
+
+            if not pending_tool_calls:
+                break
+
+            assistant_message = {
+                "role": "assistant",
+                "content": response_content if response_content else None,
+                "tool_calls": [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": tc["arguments"],
+                        },
+                    }
+                    for tc in pending_tool_calls.values()
+                ],
+            }
+            messages.append(assistant_message)
+
+            # Execute every requested tool call and append each result.
+            for tc in pending_tool_calls.values():
+                result_str = registry.call(tc["name"], tc["arguments"])
+                print(f"[Tool call: {tc['name']}({tc['arguments']})] {result_str}")
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result_str,
+                })
+
+            if finish_reason != "tool_calls":
+                break
+
+        else:
+            print(f"[Agent] Reached max iterations ({self._config.max_iterations}) without completing.")
+
+
+llm_client = LLMClient(LLMClientConfig(), mode="agent")
+asyncio.run(llm_client.run("What is the weather in New York and what time is it in Tokyo?"))
