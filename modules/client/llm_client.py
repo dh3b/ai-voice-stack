@@ -13,20 +13,20 @@ class LLMClient:
         self._config = llm_client_config
         self._client = AsyncOpenAI(base_url="http://localhost:43001/v1", api_key="none")
 
-    async def run(self, user_message: str):
+    async def run(self, user_message: str, queue: asyncio.Queue | None = None):
         messages = [
             {"role": "system", "content": self._config.system_instructions},
             {"role": "user", "content": user_message},
         ]
 
         if self._config.mode == "agent":
-            await self._run_agent(messages)
+            await self._run_agent(messages, queue)
         elif self._config.mode == "chatbot":
-            await self._run_chatbot(messages)
+            await self._run_chatbot(messages, queue)
         else:
             raise ValueError(f"Invalid mode: {self._config.mode}")
 
-    async def _run_chatbot(self, messages: str):
+    async def _run_chatbot(self, messages: str, queue: asyncio.Queue | None = None):
         stream = await self._client.chat.completions.create(
             model=self._config.chatbot_model_path,
             messages=messages,
@@ -37,11 +37,13 @@ class LLMClient:
         async for event in stream:
             chunk = event.choices[0].delta.content
             if isinstance(chunk, str):
+                if queue:
+                    await queue.put(chunk)
                 print(chunk, end="", flush=True)
 
         print()
 
-    async def _run_agent(self, messages: str):
+    async def _run_agent(self, messages: str, queue: asyncio.Queue | None = None):
         for it in range(self._config.max_iterations):
             stream = await self._client.chat.completions.create(
                 model=self._config.agent_model_path,
@@ -69,6 +71,8 @@ class LLMClient:
 
                 if delta.content:
                     response_content += delta.content
+                    if queue:
+                        await queue.put(delta.content)
                     print(delta.content, end="", flush=True)
 
                 if delta.tool_calls:

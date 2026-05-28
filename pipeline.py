@@ -21,16 +21,28 @@ async def main():
         await oww_client.run(detected_event=wakeword_detected)
         oww_client.reset()
 
+        # Play confirmation sound here
+
         print("[main] Wakeword detected. Starting STT...")
         await stt_client.run(transcript_queue)
 
         transcript = await transcript_queue.get()
         print(f"[main] Transcript: {transcript}")
 
+        # Play confirmation sound here
+
         if not transcript:
             continue
 
-        # TODO: send transcript to llm_client, then tts_client
+        # Optional transcript processing might go here
+
+        response_queue = asyncio.Queue()
+        llm_task = asyncio.create_task(llm_client.run(transcript, response_queue))
+        tts_task = asyncio.create_task(tts_client.play(response_queue))
+
+        await llm_task
+        await response_queue.put(None)
+        await tts_task
 
 
 if __name__ == "__main__":

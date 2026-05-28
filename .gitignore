@@ -3,5 +3,6 @@
 .ruff_cache
 /models
 /temp
+/logs
 /llama_cpp_bin
 __pycache__/

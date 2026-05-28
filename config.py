@@ -50,3 +50,5 @@ class TTSClientConfig:
     length_scale: float = 1.5
     noise_scale: float = 1.0
     noise_w_scale: float = 0.5
+    chunk_mode: Literal["sentence", "chars", "words"] = "sentence"
+    chunk_size: int = 3
