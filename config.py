@@ -5,16 +5,17 @@ from typing import Literal
 
 @dataclass
 class LLMClientConfig:
-    agent_model_path: str = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+    agent_model_path: str = "./models/gemma-4-E4B-it-Q4_K_M.gguf"
     chatbot_model_path: str = "./models/gemma-4-E4B-it-Q4_K_M.gguf"
     system_instructions: str = (
         "Respond in plain spoken prose only - no markdown, bullet points, headers, bold, "
         "emojis, or special characters. Keep responses short: 10-30 seconds of speaking "
-        "time, scaled to task complexity."
+        "time, scaled to task complexity. Saying I don't know is rewarded, but rambling is not. "
     )
     temperature: float = 0.6
     max_iterations: int = 10
     mode: Literal["agent", "chatbot"] = "agent"
+
 
 @dataclass
 class OWWClientConfig:
@@ -39,6 +40,7 @@ class STTClientConfig:
     channels: int = 1
     dtype: type = int16
     block_size: int = 4000  # 250ms chunks
+    response_timeout: float = 5.0  # max seconds to wait for speech before aborting
 
 
 @dataclass

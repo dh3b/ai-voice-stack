@@ -66,7 +66,31 @@ class STTClient:
 
     async def _read_transcripts(self, reader: asyncio.StreamReader, transcript_queue: asyncio.Queue, stop_event: asyncio.Event):
         confirmed_text = []
-        async for raw_line in reader:
+        deadline = asyncio.get_event_loop().time() + self._config.response_timeout
+        got_first_partial = False
+
+        while not stop_event.is_set():
+            if not got_first_partial:
+                now = asyncio.get_event_loop().time()
+                if now >= deadline:
+                    print(
+                        f"\n[stt] No speech detected within {self._config.response_timeout}s"
+                    )
+                    await transcript_queue.put("")
+                    stop_event.set()
+                    break
+                timeout = min(deadline - now, 0.5)
+            else:
+                timeout = None
+
+            try:
+                raw_line = await asyncio.wait_for(reader.readline(), timeout=timeout)
+            except asyncio.TimeoutError:
+                continue
+
+            if not raw_line:
+                break
+
             line = raw_line.decode().strip()
             if not line:
                 continue
@@ -77,6 +101,8 @@ class STTClient:
 
             text = msg.get("text", "").strip()
             if text:
+                if not got_first_partial:
+                    got_first_partial = True
                 confirmed_text.append(text)
                 print(f"[stt partial] {''.join(confirmed_text)}", end="\r")
 

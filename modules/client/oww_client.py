@@ -1,5 +1,4 @@
 import asyncio
-import time
 from pathlib import Path
 import sys
 import sounddevice as sd
@@ -13,8 +12,8 @@ class OWWClient:
     def __init__(self, config: OWWClientConfig) -> None:
         self._config = config
         self._stop_event = asyncio.Event()
-        self._last_detection_time = -float("inf")
-        self._cooldown = 5.0
+        self._settle_threshold = max(0.1, config.threshold * 0.4)
+        self._settle_chunks = 5
         try:
             self._model = Model(
                 wakeword_models=self._config.model_paths,
@@ -34,33 +33,32 @@ class OWWClient:
                 dtype=self._config.dtype,
                 blocksize=self._config.chunk_size,
             ) as mic_stream:
+                settle_count = 0
                 while not self._stop_event.is_set():
                     audio, _ = mic_stream.read(self._config.chunk_size)
                     audio = audio.flatten()
 
-                    pred = self._model.predict(audio)
+                    self._model.predict(audio)
+                    max_score = max(list(buf)[-1] for buf in self._model.prediction_buffer.values())
 
-                    for mdl in self._model.prediction_buffer.keys():
-                        scores = list(self._model.prediction_buffer[mdl])
+                    if settle_count < self._settle_chunks:
+                        if max_score < self._settle_threshold:
+                            settle_count += 1
+                        else:
+                            settle_count = 0
+                        continue
 
-                        if scores[-1] > self._config.threshold:
-                            now = time.monotonic()
-                            if now - self._last_detection_time < self._cooldown:
-                                continue
-                            self._last_detection_time = now
-                            print(
-                                f"Wakeword detected by model '{mdl}' with score {scores[-1]:.5f}/{self._config.threshold}"
-                            )
-                            if detected_event:
-                                detected_event.set()
-                            self._stop_event.set()
-                            break
+                    if max_score > self._config.threshold:
+                        print(f"Wakeword detected with score {max_score:.5f}/{self._config.threshold}")
+                        if detected_event:
+                            detected_event.set()
+                        self._stop_event.set()
+                        break
         except Exception as e:
             print(f"[error] Audio stream error: {e}")
 
     def reset(self) -> None:
         self._stop_event.clear()
-        self._last_detection_time = time.monotonic()
 
     def stop(self) -> None:
         self._stop_event.set()
