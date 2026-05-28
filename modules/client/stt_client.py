@@ -28,7 +28,7 @@ class STTClient:
         try:
             await asyncio.gather(
                 self._stream_mic_to_server(writer, stop_event),
-                self._read_transcripts(reader, transcript_queue),
+                self._read_transcripts(reader, transcript_queue, stop_event),
             )
         except KeyboardInterrupt:
             print("\nStopping...")
@@ -64,9 +64,7 @@ class STTClient:
         writer.close()
         await writer.wait_closed()
 
-    async def _read_transcripts(
-        self, reader: asyncio.StreamReader, transcript_queue: asyncio.Queue
-    ):
+    async def _read_transcripts(self, reader: asyncio.StreamReader, transcript_queue: asyncio.Queue, stop_event: asyncio.Event):
         confirmed_text = []
         async for raw_line in reader:
             line = raw_line.decode().strip()
@@ -84,10 +82,11 @@ class STTClient:
 
             if msg.get("is_final"):
                 utterance = " ".join(confirmed_text).strip()
-                if utterance:
-                    print(f"\n[stt final]   {utterance}")
-                    await transcript_queue.put(utterance)
+                print(f"\n[stt final]   '{utterance}'")
+                await transcript_queue.put(utterance)
                 confirmed_text = []
+                stop_event.set()
+                break
 
 
 async def main():

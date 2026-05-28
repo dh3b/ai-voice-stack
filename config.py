@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from numpy import int16
+from typing import Literal
 
 
 @dataclass
@@ -13,7 +14,7 @@ class LLMClientConfig:
     )
     temperature: float = 0.6
     max_iterations: int = 10
-
+    mode: Literal["agent", "chatbot"] = "agent"
 
 @dataclass
 class OWWClientConfig:

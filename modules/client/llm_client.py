@@ -2,7 +2,6 @@ import asyncio
 import sys
 from pathlib import Path
 from openai import AsyncOpenAI
-from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # temporary
 from config import LLMClientConfig
@@ -10,10 +9,9 @@ from modules.utility.tool_registry import registry
 
 
 class LLMClient:
-    def __init__(self, llm_client_config: LLMClientConfig, mode: Literal["agent", "chatbot"]):
+    def __init__(self, llm_client_config: LLMClientConfig):
         self._config = llm_client_config
         self._client = AsyncOpenAI(base_url="http://localhost:43001/v1", api_key="none")
-        self._mode = mode
 
     async def run(self, user_message: str):
         messages = [
@@ -21,12 +19,12 @@ class LLMClient:
             {"role": "user", "content": user_message},
         ]
 
-        if self._mode == "agent":
+        if self._config.mode == "agent":
             await self._run_agent(messages)
-        elif self._mode == "chatbot":
+        elif self._config.mode == "chatbot":
             await self._run_chatbot(messages)
         else:
-            raise ValueError(f"Invalid mode: {self._mode}")
+            raise ValueError(f"Invalid mode: {self._config.mode}")
 
     async def _run_chatbot(self, messages: str):
         stream = await self._client.chat.completions.create(
@@ -133,5 +131,6 @@ class LLMClient:
             print(f"[Agent] Reached max iterations ({self._config.max_iterations}) without completing.")
 
 
-llm_client = LLMClient(LLMClientConfig(), mode="agent")
-asyncio.run(llm_client.run("What is the weather in New York and what time is it in Tokyo?"))
+if __name__ == "__main__":
+    llm_client = LLMClient(LLMClientConfig())
+    asyncio.run(llm_client.run("What is the weather in New York and what time is it in Tokyo?"))
