@@ -10,7 +10,7 @@ import sounddevice as sd
 
 from config import AppConfig
 
-logger = logging.getLogger("voice_stack")
+logger = logging.getLogger("voice_stack.earcon")
 
 _SR = 16000
 _FADE_S = 0.005
@@ -42,4 +42,4 @@ def play(sound: np.ndarray) -> None:
     try:
         sd.play(sound, _SR)
     except Exception as e:
-        logger.warning(f"[earcon] playback failed: {e}")
+        logger.warning(f"Playback failed: {e}")

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import TTSClientConfig, AppConfig
 from modules.utility.latency import tracer, TTS_FIRST_CHUNK, AUDIO_FIRST_WRITE
 
-logger = logging.getLogger("voice_stack")
+logger = logging.getLogger("voice_stack.tts")
 
 
 class TTSClient:
@@ -50,9 +50,9 @@ class TTSClient:
                     timeout=60.0,
                 )
                 resp.raise_for_status()
-            logger.debug("[tts] Piper warmed up.")
+            logger.debug("Piper warmed up.")
         except Exception as e:
-            logger.warning(f"[tts] warmup skipped ({e!r}); first synth may be cold.")
+            logger.warning(f"warmup skipped ({e!r}); first synth may be cold.")
 
     def interrupt(self) -> None:
         """Signal an in-progress play() to stop ASAP and flush buffered audio."""
@@ -257,7 +257,7 @@ class TTSClient:
 
 
 async def main():
-    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+    logging.basicConfig(level=AppConfig().logging_level, format=AppConfig().logging_format)
     client = TTSClient(TTSClientConfig())
     token_queue = asyncio.Queue()
     for text in [

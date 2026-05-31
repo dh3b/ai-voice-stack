@@ -11,7 +11,7 @@ from config import LLMClientConfig, AppConfig
 from modules.utility.tool_registry import registry
 from modules.utility.latency import tracer, LLM_FIRST_TOKEN
 
-logger = logging.getLogger("voice_stack")
+logger = logging.getLogger("voice_stack.llm")
 
 
 class LLMClient:
@@ -45,9 +45,9 @@ class LLMClient:
                     f"{self._base_url}/chat/completions", json=payload, timeout=120.0
                 )
                 resp.raise_for_status()
-            logger.debug("[llm] warmed up.")
+            logger.debug("warmed up.")
         except Exception as e:
-            logger.warning(f"[llm] warmup skipped ({e!r}); first turn may be cold.")
+            logger.warning(f"warmup skipped ({e!r}); first turn may be cold.")
 
     async def run(self, user_message: str, queue: asyncio.Queue | None = None):
         if not self._config.history_enabled:
@@ -194,7 +194,7 @@ class LLMClient:
 
             for tc in pending_tool_calls.values():
                 result_str = registry.call(tc["name"], tc["arguments"])
-                logger.info(f"[Tool call: {tc['name']}({tc['arguments']})] {result_str}")
+                logger.info(f"tool call {tc['name']}({tc['arguments']}): {result_str}")
 
                 messages.append({
                     "role": "tool",
@@ -206,12 +206,12 @@ class LLMClient:
                 break
 
         else:
-            logger.warning(f"[Agent] Reached max iterations ({self._config.max_iterations}) without completing.")
+            logger.warning(f"Reached max iterations ({self._config.max_iterations}) without completing.")
 
         return "".join(total_spoken)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+    logging.basicConfig(level=AppConfig().logging_level, format=AppConfig().logging_format)
     llm_client = LLMClient(LLMClientConfig())
     asyncio.run(llm_client.run("What is the weather in New York and what time is it in Tokyo?"))

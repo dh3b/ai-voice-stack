@@ -3,7 +3,7 @@
 import logging
 import time
 
-logger = logging.getLogger("voice_stack")
+logger = logging.getLogger("voice_stack.latency")
 
 # Milestone labels, in pipeline order. The report walks this sequence and prints
 # the delta between each consecutive pair that was actually recorded.
@@ -38,10 +38,10 @@ class LatencyTracer:
         recorded = [(s, self._marks[s]) for s in _STAGES if s in self._marks]
         if len(recorded) < 2:
             missing = [s for s in _STAGES if s not in self._marks]
-            logger.debug(f"[latency] incomplete turn; missing marks: {', '.join(missing)}")
+            logger.debug(f"Incomplete turn; missing marks: {', '.join(missing)}")
             return
 
-        logger.debug("[latency] turn timings (ms):")
+        logger.debug("Turn timings (ms):")
         for (a_label, a_ts), (b_label, b_ts) in zip(recorded, recorded[1:]):
             logger.debug(f"  {a_label:>18} -> {b_label:<18} {(b_ts - a_ts) * 1000:8.1f}")
 
@@ -51,7 +51,7 @@ class LatencyTracer:
 
         missing = [s for s in _STAGES if s not in self._marks]
         if missing:
-            logger.debug(f"[latency] (missing marks: {', '.join(missing)})")
+            logger.debug(f"Missing marks: {', '.join(missing)}")
 
 
 tracer = LatencyTracer()

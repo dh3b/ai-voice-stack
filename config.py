@@ -1,11 +1,15 @@
 from dataclasses import dataclass, field
 from numpy import int16
 from typing import Literal
+from logging import INFO, DEBUG, WARNING, ERROR, CRITICAL
 
 @dataclass
 class AppConfig:
     enable_earcons: bool = True
     warmup_on_init: bool = True
+    logging_format: str = "%(asctime)s %(levelname)s [%(name)s]: %(message)s"
+    logging_level: int = INFO
+    disable_http_logging: bool = True # set to True to reduce noise from httpx and openai client logs
 
 
 @dataclass

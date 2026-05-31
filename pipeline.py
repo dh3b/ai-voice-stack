@@ -8,8 +8,17 @@ from modules.client.llm_client import LLMClient
 from modules.utility.latency import tracer
 from modules.utility import earcon
 
-logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
-logger = logging.getLogger("voice_stack")
+app_config = cfg.AppConfig()
+
+logging.basicConfig(level=app_config.logging_level, format=app_config.logging_format)
+logger = logging.getLogger("voice_stack.main")
+
+if app_config.disable_http_logging:
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
+    logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
+    logging.getLogger("openai._base_client").setLevel(logging.WARNING)
+
 
 oww_cfg = cfg.OWWClientConfig()
 stt_cfg = cfg.STTClientConfig()
@@ -32,9 +41,9 @@ async def run_turn(transcript: str) -> None:
         # wait_for cancels llm_task if it overruns the budget.
         await asyncio.wait_for(llm_task, timeout=llm_cfg.response_timeout)
     except asyncio.TimeoutError:
-        logger.warning(f"[main] LLM exceeded {llm_cfg.response_timeout}s; ending turn.")
+        logger.warning(f"LLM exceeded {llm_cfg.response_timeout}s; ending turn.")
     except Exception as e:
-        logger.error(f"[main] LLM error: {e!r}; ending turn.")
+        logger.error(f"LLM error: {e!r}; ending turn.")
     finally:
         if not llm_task.done():
             llm_task.cancel()
@@ -42,7 +51,7 @@ async def run_turn(transcript: str) -> None:
         try:
             await tts_task
         except Exception as e:
-            logger.error(f"[main] TTS error: {e!r}")
+            logger.error(f"TTS error: {e!r}")
 
 
 async def run_turn_with_bargein(transcript: str) -> bool:
@@ -81,22 +90,22 @@ async def main():
 
     while True:
         if not skip_wakeword:
-            logger.info("[main] Listening for wakeword...")
             await oww_client.run()
         skip_wakeword = False
 
         earcon.play(earcon.WAKE_ACK)
 
-        logger.info("[main] Wakeword detected. Starting STT...")
+        logger.info("Wakeword detected. Starting STT...")
         tracer.reset()
         await stt_client.run(transcript_queue)
 
         transcript = await transcript_queue.get()
-        logger.info(f"[main] Transcript: {transcript}")
+        logger.info(f"Transcript: {transcript}")
 
         if not transcript:
             continue
 
+        logger.info("Starting LLM/TTS turn...")
         earcon.play(earcon.ENDPOINT_ACK)
 
         # Optional transcript processing might go here
@@ -105,7 +114,7 @@ async def main():
         tracer.report()
 
         if interrupted:
-            logger.info("[main] Barge-in: re-listening immediately.")
+            logger.info("Barge-in: re-listening immediately.")
             skip_wakeword = True
 
 
@@ -113,5 +122,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("[main] Shutting down...")
+        logger.info("Shutting down...")
         oww_client.stop()

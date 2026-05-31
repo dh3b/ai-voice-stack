@@ -7,10 +7,10 @@ import numpy as np
 import sounddevice as sd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from config import STTClientConfig
+from config import STTClientConfig, AppConfig
 from modules.utility.latency import tracer, ENDPOINT_FINAL
 
-logger = logging.getLogger("voice_stack")
+logger = logging.getLogger("voice_stack.stt")
 
 
 class STTClient:
@@ -23,12 +23,12 @@ class STTClient:
                 self._config.server_host, self._config.server_port
             )
         except ConnectionRefusedError:
-            logger.error(f"[stt] Could not connect to {self._config.server_host}:{self._config.server_port} - is the server running?")
+            logger.error(f"Could not connect to {self._config.server_host}:{self._config.server_port} - is the server running?")
             # Unblock the orchestrator's transcript_queue.get(); "" => return to listening.
             await transcript_queue.put("")
             return
 
-        logger.info(f"[stt] Connected to {self._config.server_host}:{self._config.server_port}")
+        logger.info(f"Connected to {self._config.server_host}:{self._config.server_port}")
         stop_event = asyncio.Event()
 
         try:
@@ -37,7 +37,7 @@ class STTClient:
                 self._read_transcripts(reader, transcript_queue, stop_event),
             )
         except KeyboardInterrupt:
-            logger.info("[stt] Stopping...")
+            logger.info("Stopping...")
             stop_event.set()
 
     async def _stream_mic_to_server(
@@ -48,7 +48,7 @@ class STTClient:
 
         def sd_callback(indata: np.ndarray, frames, time, status):
             if status:
-                logger.warning(f"[sounddevice] {status}")
+                logger.warning(f"sounddevice: {status}")
             loop.call_soon_threadsafe(audio_queue.put_nowait, indata.tobytes())
 
         with sd.InputStream(
@@ -58,7 +58,7 @@ class STTClient:
             blocksize=self._config.block_size,
             callback=sd_callback,
         ):
-            logger.info("[mic] Streaming audio to SimulStreaming server...")
+            logger.info("Streaming audio to SimulStreaming server...")
             while not stop_event.is_set():
                 try:
                     chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.5)
@@ -79,7 +79,7 @@ class STTClient:
             if not got_first_partial:
                 now = asyncio.get_event_loop().time()
                 if now >= deadline:
-                    logger.info(f"[stt] No speech detected within {self._config.response_timeout}s")
+                    logger.info(f"No speech detected within {self._config.response_timeout}s")
                     await transcript_queue.put("")
                     stop_event.set()
                     break
@@ -115,7 +115,7 @@ class STTClient:
                 tracer.mark(ENDPOINT_FINAL)
                 utterance = " ".join(confirmed_text).strip()
                 sys.stdout.write("\n")
-                logger.info(f"[stt final]   '{utterance}'")
+                logger.info(f"transcript: '{utterance}'")
                 await transcript_queue.put(utterance)
                 confirmed_text = []
                 stop_event.set()
@@ -123,14 +123,14 @@ class STTClient:
 
 
 async def main():
-    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+    logging.basicConfig(level=AppConfig().logging_level, format=AppConfig().logging_format)
     client = STTClient(STTClientConfig())
     transcript_queue = asyncio.Queue()
 
     async def llm_consumer(queue: asyncio.Queue):
         while True:
             utterance = await queue.get()
-            logger.info(f"[llm] Received utterance: '{utterance}'")
+            logger.info(f"received utterance: '{utterance}'")
             queue.task_done()
 
     try:
