@@ -1,19 +1,7 @@
-"""Per-stage latency instrumentation for a single voice turn (P0-1).
-
-A turn flows STT endpoint -> first LLM token -> first synth chunk -> first audio
-out. Each stage calls ``tracer.mark(...)`` the moment its milestone happens; the
-orchestrator calls ``tracer.reset()`` at the start of a turn and ``tracer.report()``
-at the end to print the inter-stage durations.
-
-The tracer is a module-level singleton (mirroring ``tool_registry.registry``) so
-stages can import it without threading an object through every call. ``mark`` only
-records the *first* occurrence of each label per turn, so callers can call it
-unconditionally inside their streaming loops.
-"""
+"""Per-stage latency debug for a single voice turn."""
 
 import time
-
-import config as cfg
+from config import AppConfig
 
 # Milestone labels, in pipeline order. The report walks this sequence and prints
 # the delta between each consecutive pair that was actually recorded.
@@ -40,13 +28,6 @@ class LatencyTracer:
         self._marks.clear()
 
     def mark(self, label: str) -> None:
-        """Record a monotonic timestamp for ``label`` the first time it is seen.
-
-        Cheap no-op when disabled or already marked this turn, so it is safe to
-        call inside hot streaming loops. Each label is written by exactly one
-        stage, so the check-then-set is single-writer even once a stage runs on
-        its own thread (e.g. the playback thread after P0-3).
-        """
         if not self.enabled or label in self._marks:
             return
         self._marks[label] = time.perf_counter()
@@ -75,4 +56,4 @@ class LatencyTracer:
             print(f"[latency] (missing marks: {', '.join(missing)})")
 
 
-tracer = LatencyTracer(enabled=cfg.DEBUG_LATENCY)
+tracer = LatencyTracer(enabled=AppConfig().debug_latency)

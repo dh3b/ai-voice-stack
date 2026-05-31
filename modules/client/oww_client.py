@@ -13,10 +13,6 @@ from config import OWWClientConfig
 class OWWClient:
     def __init__(self, config: OWWClientConfig) -> None:
         self._config = config
-        # threading.Event (not asyncio.Event): mic capture now runs on PortAudio's
-        # callback thread, and stop()/reset() may be called from any thread (e.g.
-        # a barge-in detection). threading.Event is fully threadsafe for
-        # set/clear/is_set, and we only ever poll is_set() (never await wait()).
         self._stop_event = threading.Event()
         self._settle_threshold = max(0.1, config.threshold * 0.4)
         self._settle_chunks = 5
@@ -32,8 +28,6 @@ class OWWClient:
 
     async def run(self, detected_event: asyncio.Event | None = None) -> None:
         print("Listening for wakewords...")
-        # Self-arm: start fresh regardless of a prior detection or stop() (e.g. a
-        # barge-in listener that the orchestrator stop()s when the turn finishes).
         self._stop_event.clear()
         loop = asyncio.get_event_loop()
         audio_queue: asyncio.Queue[np.ndarray] = asyncio.Queue()

@@ -17,12 +17,8 @@ def start_server() -> subprocess.Popen:
         "--host", SERVER_HOST,
         "--port", str(SERVER_PORT),
         "--jinja",
-        "-c", "4096",  # cap context; default loads the model's full ctx -> wasted KV on CPU
-        # No NVIDIA GPU detected on this machine (nvidia-smi absent), so GPU offload
-        # is omitted -- the ~1s time-to-first-token is CPU inference. With a
-        # CUDA/Vulkan llama.cpp build + GPU, add "-ngl", "99" (and "-fa", "on");
-        # that is the single biggest TTFT win. On CPU, prefer a smaller/faster
-        # model or trimming prompt tokens (see P1-3 tool-schema gating).
+        "-c", "4096",
+        # TODO: add "-ngl", "99" (and "-fa", "on");
     ]
 
     print(f"[server] Starting: {' '.join(cmd)}")

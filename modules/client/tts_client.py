@@ -12,8 +12,7 @@ import numpy as np
 import sounddevice as sd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-import config as cfg
-from config import TTSClientConfig
+from config import TTSClientConfig, AppConfig
 from modules.utility.latency import tracer, TTS_FIRST_CHUNK, AUDIO_FIRST_WRITE
 
 
@@ -24,17 +23,13 @@ class TTSClient:
     def __init__(self, config: TTSClientConfig):
         self._config = config
         self._url = f"http://{config.server_host}:{config.server_port}/"
-        # Dedicated single-thread executor for the blocking audio writes. Kept
-        # off the default ThreadPoolExecutor so other offloaded work can't starve
-        # playback (HANDOFF blind-spot #4).
         self._playback_executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="tts-playback"
         )
-        # Set by interrupt() (barge-in, P0-5): stops the synth loop and the
-        # playback thread, which then abort()s the stream to flush buffered audio.
+
         self._stop_event = threading.Event()
 
-        if cfg.WARMUP_ON_INIT:
+        if AppConfig().warmup_on_init:
             self._warmup()
 
     def _warmup(self) -> None:
@@ -63,7 +58,6 @@ class TTSClient:
     async def play(self, token_queue: asyncio.Queue):
         self._stop_event.clear()
         loop = asyncio.get_event_loop()
-        # Thread-safe handoff: the (async) synth loop produces, the playback
         # thread consumes. Must be a queue.Queue, not asyncio.Queue.
         audio_queue: queue.Queue = queue.Queue()
 
@@ -102,13 +96,7 @@ class TTSClient:
         await asyncio.gather(_synthesize_loop(), playback_future)
 
     def _playback_worker(self, audio_queue: "queue.Queue") -> None:
-        """Consume synthesized audio and write it to the speaker in small chunks.
-
-        Runs on self._playback_executor (a dedicated thread) so the blocking
-        OutputStream.write() never stalls the event loop. Between chunks it checks
-        the stop flag; on stop it abort()s the stream so already-buffered samples
-        are flushed instead of played to completion (HANDOFF blind-spots #1, #2).
-        """
+        """Consume synthesized audio and write it to the speaker in small chunks."""
         stream: sd.OutputStream | None = None
         try:
             while not self._stop_event.is_set():
@@ -169,7 +157,7 @@ class TTSClient:
             return None
 
     async def _iter_hybrid(self, token_queue: asyncio.Queue):
-        """Emit the first chunk early, then revert to sentence granularity (P1-1).
+        """Emit the first chunk early, then revert to sentence granularity.
 
         The opener is whichever lands first as tokens stream: a clause boundary
         (, ; : . ? !) or first_chunk_max_words complete words. That starts audio
