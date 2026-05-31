@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 import sys
 from pathlib import Path
@@ -9,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # tempor
 from config import LLMClientConfig, AppConfig
 from modules.utility.tool_registry import registry
 from modules.utility.latency import tracer, LLM_FIRST_TOKEN
+
+logger = logging.getLogger("voice_stack")
 
 
 class LLMClient:
@@ -42,9 +45,9 @@ class LLMClient:
                     f"{self._base_url}/chat/completions", json=payload, timeout=120.0
                 )
                 resp.raise_for_status()
-            print("[llm] warmed up.")
+            logger.debug("[llm] warmed up.")
         except Exception as e:
-            print(f"[llm] warmup skipped ({e!r}); first turn may be cold.")
+            logger.warning(f"[llm] warmup skipped ({e!r}); first turn may be cold.")
 
     async def run(self, user_message: str, queue: asyncio.Queue | None = None):
         if not self._config.history_enabled:
@@ -105,9 +108,10 @@ class LLMClient:
                 spoken_text.append(chunk)
                 if queue:
                     await queue.put(chunk)
-                print(chunk, end="", flush=True)
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
 
-        print()
+        sys.stdout.write("\n")
         return "".join(spoken_text)
 
     async def _run_agent(self, messages: list[dict], queue: asyncio.Queue | None = None) -> str:
@@ -143,7 +147,8 @@ class LLMClient:
                     total_spoken.append(delta.content)
                     if queue:
                         await queue.put(delta.content)
-                    print(delta.content, end="", flush=True)
+                    sys.stdout.write(delta.content)
+                    sys.stdout.flush()
 
                 if delta.tool_calls:
                     for tc_delta in delta.tool_calls:
@@ -164,7 +169,7 @@ class LLMClient:
                     break
 
             if response_content:
-                print()
+                sys.stdout.write("\n")
 
             if not pending_tool_calls:
                 break
@@ -189,7 +194,7 @@ class LLMClient:
 
             for tc in pending_tool_calls.values():
                 result_str = registry.call(tc["name"], tc["arguments"])
-                print(f"[Tool call: {tc['name']}({tc['arguments']})] {result_str}")
+                logger.info(f"[Tool call: {tc['name']}({tc['arguments']})] {result_str}")
 
                 messages.append({
                     "role": "tool",
@@ -201,11 +206,12 @@ class LLMClient:
                 break
 
         else:
-            print(f"[Agent] Reached max iterations ({self._config.max_iterations}) without completing.")
+            logger.warning(f"[Agent] Reached max iterations ({self._config.max_iterations}) without completing.")
 
         return "".join(total_spoken)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
     llm_client = LLMClient(LLMClientConfig())
     asyncio.run(llm_client.run("What is the weather in New York and what time is it in Tokyo?"))

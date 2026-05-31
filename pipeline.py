@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import config as cfg
 from modules.client.oww_client import OWWClient
 from modules.client.stt_client import STTClient
@@ -6,6 +7,9 @@ from modules.client.tts_client import TTSClient
 from modules.client.llm_client import LLMClient
 from modules.utility.latency import tracer
 from modules.utility import earcon
+
+logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+logger = logging.getLogger("voice_stack")
 
 oww_cfg = cfg.OWWClientConfig()
 stt_cfg = cfg.STTClientConfig()
@@ -28,9 +32,9 @@ async def run_turn(transcript: str) -> None:
         # wait_for cancels llm_task if it overruns the budget.
         await asyncio.wait_for(llm_task, timeout=llm_cfg.response_timeout)
     except asyncio.TimeoutError:
-        print(f"\n[main] LLM exceeded {llm_cfg.response_timeout}s; ending turn.")
+        logger.warning(f"[main] LLM exceeded {llm_cfg.response_timeout}s; ending turn.")
     except Exception as e:
-        print(f"\n[main] LLM error: {e!r}; ending turn.")
+        logger.error(f"[main] LLM error: {e!r}; ending turn.")
     finally:
         if not llm_task.done():
             llm_task.cancel()
@@ -38,7 +42,7 @@ async def run_turn(transcript: str) -> None:
         try:
             await tts_task
         except Exception as e:
-            print(f"[main] TTS error: {e!r}")
+            logger.error(f"[main] TTS error: {e!r}")
 
 
 async def run_turn_with_bargein(transcript: str) -> bool:
@@ -77,18 +81,18 @@ async def main():
 
     while True:
         if not skip_wakeword:
-            print("\n[main] Listening for wakeword...")
+            logger.info("[main] Listening for wakeword...")
             await oww_client.run()
         skip_wakeword = False
 
         earcon.play(earcon.WAKE_ACK)
 
-        print("[main] Wakeword detected. Starting STT...")
+        logger.info("[main] Wakeword detected. Starting STT...")
         tracer.reset()
         await stt_client.run(transcript_queue)
 
         transcript = await transcript_queue.get()
-        print(f"[main] Transcript: {transcript}")
+        logger.info(f"[main] Transcript: {transcript}")
 
         if not transcript:
             continue
@@ -101,7 +105,7 @@ async def main():
         tracer.report()
 
         if interrupted:
-            print("[main] Barge-in: re-listening immediately.")
+            logger.info("[main] Barge-in: re-listening immediately.")
             skip_wakeword = True
 
 
@@ -109,5 +113,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n[main] Shutting down...")
+        logger.info("[main] Shutting down...")
         oww_client.stop()

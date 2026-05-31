@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from pathlib import Path
 import sys
 import numpy as np
@@ -8,6 +9,8 @@ import sounddevice as sd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import STTClientConfig
 from modules.utility.latency import tracer, ENDPOINT_FINAL
+
+logger = logging.getLogger("voice_stack")
 
 
 class STTClient:
@@ -20,12 +23,12 @@ class STTClient:
                 self._config.server_host, self._config.server_port
             )
         except ConnectionRefusedError:
-            print(f"[error] Could not connect to {self._config.server_host}:{self._config.server_port} - is the server running?")
+            logger.error(f"[stt] Could not connect to {self._config.server_host}:{self._config.server_port} - is the server running?")
             # Unblock the orchestrator's transcript_queue.get(); "" => return to listening.
             await transcript_queue.put("")
             return
 
-        print(f"Connected to {self._config.server_host}:{self._config.server_port}")
+        logger.info(f"[stt] Connected to {self._config.server_host}:{self._config.server_port}")
         stop_event = asyncio.Event()
 
         try:
@@ -34,7 +37,7 @@ class STTClient:
                 self._read_transcripts(reader, transcript_queue, stop_event),
             )
         except KeyboardInterrupt:
-            print("\nStopping...")
+            logger.info("[stt] Stopping...")
             stop_event.set()
 
     async def _stream_mic_to_server(
@@ -45,7 +48,7 @@ class STTClient:
 
         def sd_callback(indata: np.ndarray, frames, time, status):
             if status:
-                print(f"[sounddevice] {status}", file=sys.stderr)
+                logger.warning(f"[sounddevice] {status}")
             loop.call_soon_threadsafe(audio_queue.put_nowait, indata.tobytes())
 
         with sd.InputStream(
@@ -55,7 +58,7 @@ class STTClient:
             blocksize=self._config.block_size,
             callback=sd_callback,
         ):
-            print("[mic] Streaming audio to SimulStreaming server...")
+            logger.info("[mic] Streaming audio to SimulStreaming server...")
             while not stop_event.is_set():
                 try:
                     chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.5)
@@ -76,9 +79,7 @@ class STTClient:
             if not got_first_partial:
                 now = asyncio.get_event_loop().time()
                 if now >= deadline:
-                    print(
-                        f"\n[stt] No speech detected within {self._config.response_timeout}s"
-                    )
+                    logger.info(f"[stt] No speech detected within {self._config.response_timeout}s")
                     await transcript_queue.put("")
                     stop_event.set()
                     break
@@ -107,12 +108,14 @@ class STTClient:
                 if not got_first_partial:
                     got_first_partial = True
                 confirmed_text.append(text)
-                print(f"[stt partial] {''.join(confirmed_text)}", end="\r")
+                sys.stdout.write(f"\r[stt partial] {''.join(confirmed_text)}")
+                sys.stdout.flush()
 
             if msg.get("is_final"):
                 tracer.mark(ENDPOINT_FINAL)
                 utterance = " ".join(confirmed_text).strip()
-                print(f"\n[stt final]   '{utterance}'")
+                sys.stdout.write("\n")
+                logger.info(f"[stt final]   '{utterance}'")
                 await transcript_queue.put(utterance)
                 confirmed_text = []
                 stop_event.set()
@@ -120,13 +123,14 @@ class STTClient:
 
 
 async def main():
+    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
     client = STTClient(STTClientConfig())
     transcript_queue = asyncio.Queue()
 
     async def llm_consumer(queue: asyncio.Queue):
         while True:
             utterance = await queue.get()
-            print(f"[llm] Received utterance: '{utterance}'")
+            logger.info(f"[llm] Received utterance: '{utterance}'")
             queue.task_done()
 
     try:
@@ -135,7 +139,7 @@ async def main():
             llm_consumer(transcript_queue),
         )
     except KeyboardInterrupt:
-        print("\nStopping...")
+        logger.info("Stopping...")
 
 
 if __name__ == "__main__":

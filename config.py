@@ -4,7 +4,6 @@ from typing import Literal
 
 @dataclass
 class AppConfig:
-    debug_latency: bool = True
     enable_earcons: bool = True
     warmup_on_init: bool = True
 

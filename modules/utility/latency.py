@@ -1,7 +1,9 @@
 """Per-stage latency debug for a single voice turn."""
 
+import logging
 import time
-from config import AppConfig
+
+logger = logging.getLogger("voice_stack")
 
 # Milestone labels, in pipeline order. The report walks this sequence and prints
 # the delta between each consecutive pair that was actually recorded.
@@ -19,8 +21,7 @@ _STAGES: tuple[str, ...] = (
 
 
 class LatencyTracer:
-    def __init__(self, enabled: bool) -> None:
-        self.enabled = enabled
+    def __init__(self) -> None:
         self._marks: dict[str, float] = {}
 
     def reset(self) -> None:
@@ -28,32 +29,29 @@ class LatencyTracer:
         self._marks.clear()
 
     def mark(self, label: str) -> None:
-        if not self.enabled or label in self._marks:
+        if label in self._marks:
             return
         self._marks[label] = time.perf_counter()
 
     def report(self) -> None:
-        """Print the inter-stage durations recorded this turn."""
-        if not self.enabled:
-            return
-
+        """Log the inter-stage durations recorded this turn."""
         recorded = [(s, self._marks[s]) for s in _STAGES if s in self._marks]
         if len(recorded) < 2:
             missing = [s for s in _STAGES if s not in self._marks]
-            print(f"[latency] incomplete turn; missing marks: {', '.join(missing)}")
+            logger.debug(f"[latency] incomplete turn; missing marks: {', '.join(missing)}")
             return
 
-        print("[latency] turn timings (ms):")
+        logger.debug("[latency] turn timings (ms):")
         for (a_label, a_ts), (b_label, b_ts) in zip(recorded, recorded[1:]):
-            print(f"  {a_label:>18} -> {b_label:<18} {(b_ts - a_ts) * 1000:8.1f}")
+            logger.debug(f"  {a_label:>18} -> {b_label:<18} {(b_ts - a_ts) * 1000:8.1f}")
 
         first_label, first_ts = recorded[0]
         last_label, last_ts = recorded[-1]
-        print(f"  {'TOTAL':>18}    {first_label} -> {last_label}: {(last_ts - first_ts) * 1000:.1f}")
+        logger.debug(f"  {'TOTAL':>18}    {first_label} -> {last_label}: {(last_ts - first_ts) * 1000:.1f}")
 
         missing = [s for s in _STAGES if s not in self._marks]
         if missing:
-            print(f"[latency] (missing marks: {', '.join(missing)})")
+            logger.debug(f"[latency] (missing marks: {', '.join(missing)})")
 
 
-tracer = LatencyTracer(enabled=AppConfig().debug_latency)
+tracer = LatencyTracer()

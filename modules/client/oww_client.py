@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 from pathlib import Path
 import sys
@@ -8,6 +9,8 @@ from openwakeword.model import Model
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import OWWClientConfig
+
+logger = logging.getLogger("voice_stack")
 
 
 class OWWClient:
@@ -23,18 +26,18 @@ class OWWClient:
             )
             self._n_models = len(self._model.models.keys())
         except Exception as e:
-            print(f"[error] Failed to load wakeword model: {e}")
+            logger.error(f"[oww] Failed to load wakeword model: {e}")
             raise
 
     async def run(self, detected_event: asyncio.Event | None = None) -> None:
-        print("Listening for wakewords...")
+        logger.info("[oww] Listening for wakewords...")
         self._stop_event.clear()
         loop = asyncio.get_event_loop()
         audio_queue: asyncio.Queue[np.ndarray] = asyncio.Queue()
 
         def sd_callback(indata: np.ndarray, frames, time, status):
             if status:
-                print(f"[sounddevice] {status}", file=sys.stderr)
+                logger.warning(f"[sounddevice] {status}")
             # indata is a view into PortAudio's buffer; flatten() returns a copy,
             # so the chunk stays valid after the callback returns.
             loop.call_soon_threadsafe(audio_queue.put_nowait, indata.flatten())
@@ -65,13 +68,13 @@ class OWWClient:
                         continue
 
                     if max_score > self._config.threshold:
-                        print(f"Wakeword detected with score {max_score:.5f}/{self._config.threshold}")
+                        logger.info(f"[oww] Wakeword detected with score {max_score:.5f}/{self._config.threshold}")
                         if detected_event:
                             detected_event.set()
                         self._stop_event.set()
                         break
         except Exception as e:
-            print(f"[error] Audio stream error: {e}")
+            logger.error(f"[oww] Audio stream error: {e}")
 
     def reset(self) -> None:
         self._stop_event.clear()
@@ -81,11 +84,12 @@ class OWWClient:
 
 
 async def main() -> None:
+    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
     client = OWWClient(OWWClientConfig())
     try:
         await client.run()
     except KeyboardInterrupt:
-        print("\nStopping...")
+        logger.info("Stopping...")
         client.stop()
 
 

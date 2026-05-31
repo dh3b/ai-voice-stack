@@ -3,10 +3,14 @@ NOTE: like always-on barge-in, earcons that play while a mic is open can bleed
 into capture without acoustic echo cancellation. Disable via
 AppConfig.enable_earcons if that proves disruptive.
 """
+import logging
+
 import numpy as np
 import sounddevice as sd
 
 from config import AppConfig
+
+logger = logging.getLogger("voice_stack")
 
 _SR = 16000
 _FADE_S = 0.005
@@ -38,4 +42,4 @@ def play(sound: np.ndarray) -> None:
     try:
         sd.play(sound, _SR)
     except Exception as e:
-        print(f"[earcon] playback failed: {e}")
+        logger.warning(f"[earcon] playback failed: {e}")
