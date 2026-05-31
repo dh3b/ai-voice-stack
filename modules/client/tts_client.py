@@ -12,8 +12,10 @@ import numpy as np
 import sounddevice as sd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+import config as cfg
 from config import TTSClientConfig
 from modules.utility.latency import tracer, TTS_FIRST_CHUNK, AUDIO_FIRST_WRITE
+from modules.utility import aec
 
 
 class TTSClient:
@@ -32,6 +34,28 @@ class TTSClient:
         # Set by interrupt() (barge-in, P0-5): stops the synth loop and the
         # playback thread, which then abort()s the stream to flush buffered audio.
         self._stop_event = threading.Event()
+
+        if cfg.WARMUP_ON_INIT:
+            self._warmup()
+
+    def _warmup(self) -> None:
+        """Prime the Piper HTTP server (blocking) so the first synth isn't cold."""
+        try:
+            with httpx.Client() as client:
+                resp = client.post(
+                    self._url,
+                    json={
+                        "text": "Warming up.",
+                        "length_scale": self._config.length_scale,
+                        "noise_scale": self._config.noise_scale,
+                        "noise_w_scale": self._config.noise_w_scale,
+                    },
+                    timeout=60.0,
+                )
+                resp.raise_for_status()
+            print("[tts] Piper warmed up.")
+        except Exception as e:
+            print(f"[tts] warmup skipped ({e!r}); first synth may be cold.")
 
     def interrupt(self) -> None:
         """Signal an in-progress play() to stop ASAP and flush buffered audio."""
@@ -106,8 +130,12 @@ class TTSClient:
                 for start in range(0, len(samples), step):
                     if self._stop_event.is_set():
                         break
+                    out_chunk = samples[start:start + step]
+                    # Feed the AEC far-end reference at ~playback rate so the barge
+                    # listener can subtract this audio from the mic (P2-4).
+                    aec.canceller.push_far(out_chunk, sample_rate)
                     tracer.mark(AUDIO_FIRST_WRITE)
-                    stream.write(samples[start:start + step])
+                    stream.write(out_chunk)
         finally:
             if stream is not None:
                 if self._stop_event.is_set():

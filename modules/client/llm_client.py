@@ -1,9 +1,11 @@
 import asyncio
 import sys
 from pathlib import Path
+import httpx
 from openai import AsyncOpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # temporary
+import config as cfg
 from config import LLMClientConfig
 from modules.utility.tool_registry import registry
 from modules.utility.latency import tracer, LLM_FIRST_TOKEN
@@ -12,7 +14,35 @@ from modules.utility.latency import tracer, LLM_FIRST_TOKEN
 class LLMClient:
     def __init__(self, llm_client_config: LLMClientConfig):
         self._config = llm_client_config
-        self._client = AsyncOpenAI(base_url="http://localhost:43001/v1", api_key="none")
+        self._base_url = "http://localhost:43001/v1"
+        self._client = AsyncOpenAI(base_url=self._base_url, api_key="none")
+        if cfg.WARMUP_ON_INIT:
+            self._warmup()
+
+    def _warmup(self) -> None:
+        """Prime llama-server (blocking) with a 1-token completion so the first
+        real turn isn't a cold prefill (measured cold agent TTFT ~2.6s). Warms the
+        tool-schema prefill path too when in agent mode."""
+        try:
+            payload = {
+                "model": self._config.agent_model_path,
+                "messages": [
+                    {"role": "system", "content": self._config.system_instructions},
+                    {"role": "user", "content": "Hi"},
+                ],
+                "max_tokens": 1,
+                "temperature": self._config.temperature,
+            }
+            if self._config.mode == "agent":
+                payload["tools"] = registry.schemas()
+            with httpx.Client() as client:
+                resp = client.post(
+                    f"{self._base_url}/chat/completions", json=payload, timeout=120.0
+                )
+                resp.raise_for_status()
+            print("[llm] warmed up.")
+        except Exception as e:
+            print(f"[llm] warmup skipped ({e!r}); first turn may be cold.")
 
     async def run(self, user_message: str, queue: asyncio.Queue | None = None):
         messages = [

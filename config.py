@@ -12,6 +12,23 @@ DEBUG_LATENCY: bool = True
 # endpointing, masking the LLM time-to-first-token silence. Set False to disable.
 ENABLE_EARCONS: bool = True
 
+# Block client init until a warmup request primes each server, so the first real
+# turn isn't a cold prefill. Measured cold-start cost: agent TTFT 2586ms cold vs
+# ~1100ms warm. Resilient to a server being down (warmup is skipped with a note).
+WARMUP_ON_INIT: bool = True
+
+# Acoustic echo cancellation (P2-4): subtracts the TTS playback (far-end) from the
+# wakeword mic so always-on barge-in doesn't hear the assistant's own voice.
+ENABLE_AEC: bool = True
+# Adaptive filter length in samples at 16kHz (~128ms). MUST exceed the speaker->mic
+# echo delay + tail or the filter can't model the echo; tune on real hardware.
+AEC_FILTER_LEN: int = 2048
+AEC_MU: float = 0.3            # NLMS step size (0<mu<2); larger = faster but less stable
+AEC_FAR_HANGOVER_S: float = 0.2  # keep "far active" this long after the last play (echo tail)
+# Extra wakeword confidence required while TTS is playing -- a residual-echo guard
+# so imperfect AEC can't self-trigger barge-in. 0 disables the guard.
+BARGE_IN_THRESHOLD_MARGIN: float = 0.2
+
 
 @dataclass
 class LLMClientConfig:
