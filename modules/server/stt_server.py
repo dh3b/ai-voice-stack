@@ -19,7 +19,6 @@ def start_server(config: STTServerConfig) -> subprocess.Popen:
         "--port", str(config.server_port),
         "--model_path", config.model_path,
         "--language", config.language,
-        "--task", "transcribe",
         "--vac",                  # Silero VAD, fires is_final
         "--min-chunk-size", str(config.min_chunk_size),
     ]
