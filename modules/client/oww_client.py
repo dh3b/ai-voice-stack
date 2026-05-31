@@ -7,9 +7,7 @@ import sounddevice as sd
 from openwakeword.model import Model
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-import config as cfg
 from config import OWWClientConfig
-from modules.utility import aec
 
 
 class OWWClient:
@@ -62,10 +60,6 @@ class OWWClient:
                     except asyncio.TimeoutError:
                         continue
 
-                    # Echo-cancel the assistant's own playback out of the mic before
-                    # detection (P2-4). Lossless passthrough when nothing is playing.
-                    audio = aec.canceller.process(audio)
-
                     self._model.predict(audio)
                     max_score = max(list(buf)[-1] for buf in self._model.prediction_buffer.values())
 
@@ -76,14 +70,8 @@ class OWWClient:
                             settle_count = 0
                         continue
 
-                    # While audio is playing, require extra confidence so residual
-                    # echo can't self-trigger barge-in (guards imperfect AEC).
-                    threshold = self._config.threshold
-                    if aec.canceller.far_end_active():
-                        threshold += cfg.BARGE_IN_THRESHOLD_MARGIN
-
-                    if max_score > threshold:
-                        print(f"Wakeword detected with score {max_score:.5f}/{threshold}")
+                    if max_score > self._config.threshold:
+                        print(f"Wakeword detected with score {max_score:.5f}/{self._config.threshold}")
                         if detected_event:
                             detected_event.set()
                         self._stop_event.set()

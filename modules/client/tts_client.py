@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import config as cfg
 from config import TTSClientConfig
 from modules.utility.latency import tracer, TTS_FIRST_CHUNK, AUDIO_FIRST_WRITE
-from modules.utility import aec
 
 
 class TTSClient:
@@ -130,12 +129,8 @@ class TTSClient:
                 for start in range(0, len(samples), step):
                     if self._stop_event.is_set():
                         break
-                    out_chunk = samples[start:start + step]
-                    # Feed the AEC far-end reference at ~playback rate so the barge
-                    # listener can subtract this audio from the mic (P2-4).
-                    aec.canceller.push_far(out_chunk, sample_rate)
                     tracer.mark(AUDIO_FIRST_WRITE)
-                    stream.write(out_chunk)
+                    stream.write(samples[start:start + step])
         finally:
             if stream is not None:
                 if self._stop_event.is_set():
