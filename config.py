@@ -8,12 +8,13 @@ class AppConfig:
     enable_earcons: bool = True
     warmup_on_init: bool = True
 
+
 @dataclass
 class LLMServerConfig:
     model_path: str = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
     server_host: str = "127.0.0.1"
     server_port: int = 43001
-    context_window: int = 4096
+    context_window: int = 8192
 
 
 @dataclass
@@ -30,6 +31,9 @@ class LLMClientConfig:
     max_iterations: int = 10
     mode: Literal["agent", "chatbot"] = "agent"
     response_timeout: float = 60.0 # max seconds to wait for a response before aborting the turn
+    history_enabled: bool = True
+    history_max_turns: int = 3
+    history_idle_timeout_s: float = 120.0
 
 
 @dataclass

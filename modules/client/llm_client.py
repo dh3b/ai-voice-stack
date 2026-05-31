@@ -1,4 +1,5 @@
 import asyncio
+import time
 import sys
 from pathlib import Path
 import httpx
@@ -15,6 +16,8 @@ class LLMClient:
         self._config = llm_client_config
         self._base_url = f"http://{self._config.server_host}:{str(self._config.server_port)}/v1"
         self._client = AsyncOpenAI(base_url=self._base_url, api_key="none")
+        self._history: list[dict] = []
+        self._last_turn_at: float = 0.0
         if AppConfig().warmup_on_init:
             self._warmup()
 
@@ -44,19 +47,50 @@ class LLMClient:
             print(f"[llm] warmup skipped ({e!r}); first turn may be cold.")
 
     async def run(self, user_message: str, queue: asyncio.Queue | None = None):
-        messages = [
-            {"role": "system", "content": self._config.system_instructions},
-            {"role": "user", "content": user_message},
-        ]
+        if not self._config.history_enabled:
+            messages = [
+                {"role": "system", "content": self._config.system_instructions},
+                {"role": "user", "content": user_message},
+            ]
+            if self._config.mode == "agent":
+                await self._run_agent(messages, queue)
+            elif self._config.mode == "chatbot":
+                await self._run_chatbot(messages, queue)
+            else:
+                raise ValueError(f"Invalid mode: {self._config.mode}")
+            return
 
-        if self._config.mode == "agent":
-            await self._run_agent(messages, queue)
-        elif self._config.mode == "chatbot":
-            await self._run_chatbot(messages, queue)
-        else:
-            raise ValueError(f"Invalid mode: {self._config.mode}")
+        # Wipe to [system] after idle, wakeword being the reset button
+        if len(self._history) > 1 and (time.monotonic() - self._last_turn_at) > self._config.history_idle_timeout_s:
+            self._history = [self._history[0]]
 
-    async def _run_chatbot(self, messages: str, queue: asyncio.Queue | None = None):
+        # Seed system message once (keeps KV prefix stable)
+        if not self._history:
+            self._history.append({"role": "system", "content": self._config.system_instructions})
+
+        # Working copy carries user + any in-turn tool messages; _history gets only spoken text
+        working = list(self._history) + [{"role": "user", "content": user_message}]
+
+        spoken_text = ""
+        try:
+            if self._config.mode == "agent":
+                spoken_text = await self._run_agent(working, queue)
+            elif self._config.mode == "chatbot":
+                spoken_text = await self._run_chatbot(working, queue)
+            else:
+                raise ValueError(f"Invalid mode: {self._config.mode}")
+        finally:
+            if spoken_text:
+                self._history.append({"role": "user", "content": user_message})
+                self._history.append({"role": "assistant", "content": spoken_text})
+                # Drop oldest pairs from index 1 onward. 0 is system
+                max_entries = 1 + 2 * self._config.history_max_turns
+                while len(self._history) > max_entries:
+                    del self._history[1:3]
+            self._last_turn_at = time.monotonic()
+
+    async def _run_chatbot(self, messages: list[dict], queue: asyncio.Queue | None = None) -> str:
+        spoken_text = []
         stream = await self._client.chat.completions.create(
             model=self._config.model_path,
             messages=messages,
@@ -68,13 +102,16 @@ class LLMClient:
             chunk = event.choices[0].delta.content
             if isinstance(chunk, str):
                 tracer.mark(LLM_FIRST_TOKEN)
+                spoken_text.append(chunk)
                 if queue:
                     await queue.put(chunk)
                 print(chunk, end="", flush=True)
 
         print()
+        return "".join(spoken_text)
 
-    async def _run_agent(self, messages: str, queue: asyncio.Queue | None = None):
+    async def _run_agent(self, messages: list[dict], queue: asyncio.Queue | None = None) -> str:
+        total_spoken = []
         for it in range(self._config.max_iterations):
             stream = await self._client.chat.completions.create(
                 model=self._config.model_path,
@@ -103,6 +140,7 @@ class LLMClient:
                 if delta.content:
                     tracer.mark(LLM_FIRST_TOKEN)
                     response_content += delta.content
+                    total_spoken.append(delta.content)
                     if queue:
                         await queue.put(delta.content)
                     print(delta.content, end="", flush=True)
@@ -125,13 +163,13 @@ class LLMClient:
                     finish_reason = choice.finish_reason
                     break
 
-            # Newline after any streamed content.
             if response_content:
                 print()
 
             if not pending_tool_calls:
                 break
 
+            # Tool messages appended only to the working copy
             assistant_message = {
                 "role": "assistant",
                 "content": response_content if response_content else None,
@@ -149,7 +187,6 @@ class LLMClient:
             }
             messages.append(assistant_message)
 
-            # Execute every requested tool call and append each result.
             for tc in pending_tool_calls.values():
                 result_str = registry.call(tc["name"], tc["arguments"])
                 print(f"[Tool call: {tc['name']}({tc['arguments']})] {result_str}")
@@ -165,6 +202,8 @@ class LLMClient:
 
         else:
             print(f"[Agent] Reached max iterations ({self._config.max_iterations}) without completing.")
+
+        return "".join(total_spoken)
 
 
 if __name__ == "__main__":
