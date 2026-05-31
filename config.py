@@ -9,10 +9,18 @@ class AppConfig:
     warmup_on_init: bool = True
 
 @dataclass
+class LLMServerConfig:
+    model_path: str = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+    server_host: str = "127.0.0.1"
+    server_port: int = 43001
+    context_window: int = 4096
+
+
+@dataclass
 class LLMClientConfig:
-    # model paths are informational only
-    agent_model_path: str = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
-    chatbot_model_path: str = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+    model_path: str = LLMServerConfig.model_path
+    server_host: str = LLMServerConfig.server_host
+    server_port: int = LLMServerConfig.server_port
     system_instructions: str = (
         "Respond in plain spoken prose only - no markdown, bullet points, headers, bold, "
         "emojis, or special characters. Keep responses short: 10-30 seconds of speaking "
@@ -40,9 +48,18 @@ class OWWClientConfig:
 
 
 @dataclass
-class STTClientConfig:
+class STTServerConfig:
     server_host: str = "127.0.0.1"
     server_port: int = 43002
+    model_path: str = "C:/Users/user/Documents/Projects/python/ai-voice-stack/models/whisper-base.pt"
+    language: str = "auto"
+    min_chunk_size: int = 1 # process every ~1s of audio
+
+
+@dataclass
+class STTClientConfig:
+    server_host: str = STTServerConfig.server_host
+    server_port: int = STTServerConfig.server_port
     sample_rate: int = 16000
     channels: int = 1
     dtype: type = int16
@@ -51,9 +68,16 @@ class STTClientConfig:
 
 
 @dataclass
-class TTSClientConfig:
+class TTSServerConfig:
     server_host: str = "127.0.0.1"
     server_port: int = 43003
+    model_path: str = "./models/en_US-lessac-medium.onnx"
+
+
+@dataclass
+class TTSClientConfig:
+    server_host: str = TTSServerConfig.server_host
+    server_port: int = TTSServerConfig.server_port
     length_scale: float = 1.5
     noise_scale: float = 1.0
     noise_w_scale: float = 0.5

@@ -1,23 +1,21 @@
+from pathlib import Path
+import sys
 import signal
 import subprocess
 import sys
 import time
 
-# Preferrably run this in a docker container
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from config import LLMServerConfig
 
-AGENT_MODEL = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
-CHATBOT_MODEL = "./models/gemma-4-E4B-it-Q4_K_M.gguf"
-SERVER_HOST = "127.0.0.1"
-SERVER_PORT = 43001
-
-def start_server() -> subprocess.Popen:
+def start_server(config: LLMServerConfig) -> subprocess.Popen:
     cmd = [
         "llama_cpp_bin/llama-server.exe",
-        "-m", AGENT_MODEL,
-        "--host", SERVER_HOST,
-        "--port", str(SERVER_PORT),
+        "-m", config.model_path,
+        "--host", config.server_host,
+        "--port", str(config.server_port),
         "--jinja",
-        "-c", "4096",
+        "-c", str(config.context_window),
         # TODO: add "-ngl", "99" (and "-fa", "on");
     ]
 
@@ -25,7 +23,8 @@ def start_server() -> subprocess.Popen:
     return subprocess.Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
 
 def main():
-    proc = start_server()
+    config = LLMServerConfig()
+    proc = start_server(config)
 
     def _shutdown(sig, frame):
         print("\n[server] Shutting down...")
@@ -35,7 +34,7 @@ def main():
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    print(f"[server] Listening on {SERVER_HOST}:{SERVER_PORT}")
+    print(f"[server] Listening on {config.server_host}:{config.server_port}")
     while True:
         ret = proc.poll()
         if ret is not None:

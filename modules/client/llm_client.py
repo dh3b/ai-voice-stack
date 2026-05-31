@@ -13,7 +13,7 @@ from modules.utility.latency import tracer, LLM_FIRST_TOKEN
 class LLMClient:
     def __init__(self, llm_client_config: LLMClientConfig):
         self._config = llm_client_config
-        self._base_url = "http://localhost:43001/v1"
+        self._base_url = f"http://{self._config.server_host}:{str(self._config.server_port)}/v1"
         self._client = AsyncOpenAI(base_url=self._base_url, api_key="none")
         if AppConfig().warmup_on_init:
             self._warmup()
@@ -24,7 +24,7 @@ class LLMClient:
         """
         try:
             payload = {
-                "model": self._config.agent_model_path,
+                "model": self._config.model_path,
                 "messages": [
                     {"role": "system", "content": self._config.system_instructions},
                     {"role": "user", "content": "Hi"},
@@ -58,7 +58,7 @@ class LLMClient:
 
     async def _run_chatbot(self, messages: str, queue: asyncio.Queue | None = None):
         stream = await self._client.chat.completions.create(
-            model=self._config.chatbot_model_path,
+            model=self._config.model_path,
             messages=messages,
             stream=True,
             temperature=self._config.temperature,
@@ -77,7 +77,7 @@ class LLMClient:
     async def _run_agent(self, messages: str, queue: asyncio.Queue | None = None):
         for it in range(self._config.max_iterations):
             stream = await self._client.chat.completions.create(
-                model=self._config.agent_model_path,
+                model=self._config.model_path,
                 messages=messages,
                 tools=registry.schemas(),
                 tool_choice="auto",
