@@ -7,6 +7,7 @@ import sounddevice as sd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import STTClientConfig
+from modules.utility.latency import tracer, ENDPOINT_FINAL
 
 
 class STTClient:
@@ -20,6 +21,8 @@ class STTClient:
             )
         except ConnectionRefusedError:
             print(f"[error] Could not connect to {self._config.server_host}:{self._config.server_port} - is the server running?")
+            # Unblock the orchestrator's transcript_queue.get(); "" => return to listening.
+            await transcript_queue.put("")
             return
 
         print(f"Connected to {self._config.server_host}:{self._config.server_port}")
@@ -107,6 +110,7 @@ class STTClient:
                 print(f"[stt partial] {''.join(confirmed_text)}", end="\r")
 
             if msg.get("is_final"):
+                tracer.mark(ENDPOINT_FINAL)
                 utterance = " ".join(confirmed_text).strip()
                 print(f"\n[stt final]   '{utterance}'")
                 await transcript_queue.put(utterance)

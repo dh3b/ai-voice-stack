@@ -1,7 +1,10 @@
 import asyncio
 import io
+import queue
 import re
+import threading
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
 import httpx
@@ -10,63 +13,108 @@ import sounddevice as sd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import TTSClientConfig
+from modules.utility.latency import tracer, TTS_FIRST_CHUNK, AUDIO_FIRST_WRITE
 
 
 class TTSClient:
     SENTENCE_END = re.compile(r"[.?!]+")
+    CLAUSE_END = re.compile(r"[,;:.?!]+")  # first-chunk boundary for hybrid mode
 
     def __init__(self, config: TTSClientConfig):
         self._config = config
         self._url = f"http://{config.server_host}:{config.server_port}/"
-        self._stream: sd.OutputStream | None = None
+        # Dedicated single-thread executor for the blocking audio writes. Kept
+        # off the default ThreadPoolExecutor so other offloaded work can't starve
+        # playback (HANDOFF blind-spot #4).
+        self._playback_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="tts-playback"
+        )
+        # Set by interrupt() (barge-in, P0-5): stops the synth loop and the
+        # playback thread, which then abort()s the stream to flush buffered audio.
+        self._stop_event = threading.Event()
 
-    async def play(self, queue: asyncio.Queue):
-        audio_queue: asyncio.Queue[tuple[bytes, int, int] | None] = asyncio.Queue()
+    def interrupt(self) -> None:
+        """Signal an in-progress play() to stop ASAP and flush buffered audio."""
+        self._stop_event.set()
+
+    async def play(self, token_queue: asyncio.Queue):
+        self._stop_event.clear()
+        loop = asyncio.get_event_loop()
+        # Thread-safe handoff: the (async) synth loop produces, the playback
+        # thread consumes. Must be a queue.Queue, not asyncio.Queue.
+        audio_queue: queue.Queue = queue.Queue()
 
         async def _synthesize_loop():
             try:
                 async with httpx.AsyncClient() as client:
                     mode = self._config.chunk_mode
                     if mode == "chars":
-                        iterator = self._iter_chars(queue)
+                        iterator = self._iter_chars(token_queue)
                     elif mode == "words":
-                        iterator = self._iter_words(queue)
+                        iterator = self._iter_words(token_queue)
+                    elif mode == "sentence":
+                        iterator = self._iter_sentences(token_queue)
                     else:
-                        iterator = self._iter_sentences(queue)
+                        iterator = self._iter_hybrid(token_queue)
 
                     async for text in iterator:
+                        if self._stop_event.is_set():
+                            break
                         wav_bytes = await self._synthesize(client, text)
                         if wav_bytes is None:
                             continue
                         parsed = self._parse_wav(wav_bytes)
                         if parsed is None:
                             continue
-                        await audio_queue.put(parsed)
+                        tracer.mark(TTS_FIRST_CHUNK)
+                        audio_queue.put_nowait(parsed)
             finally:
-                await audio_queue.put(None)
+                audio_queue.put_nowait(None)
 
-        async def _playback_loop():
-            while True:
-                item = await audio_queue.get()
+        # Playback runs on the dedicated thread; run_in_executor hands back an
+        # awaitable so it can be gathered with the (async) synth loop.
+        playback_future = loop.run_in_executor(
+            self._playback_executor, self._playback_worker, audio_queue
+        )
+        await asyncio.gather(_synthesize_loop(), playback_future)
+
+    def _playback_worker(self, audio_queue: "queue.Queue") -> None:
+        """Consume synthesized audio and write it to the speaker in small chunks.
+
+        Runs on self._playback_executor (a dedicated thread) so the blocking
+        OutputStream.write() never stalls the event loop. Between chunks it checks
+        the stop flag; on stop it abort()s the stream so already-buffered samples
+        are flushed instead of played to completion (HANDOFF blind-spots #1, #2).
+        """
+        stream: sd.OutputStream | None = None
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    item = audio_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
                 if item is None:
                     break
                 audio_data, sample_rate, channels = item
-                if self._stream is None:
-                    self._stream = sd.OutputStream(
-                        samplerate=sample_rate,
-                        channels=channels,
-                        dtype=np.int16,
+                if stream is None:
+                    stream = sd.OutputStream(
+                        samplerate=sample_rate, channels=channels, dtype=np.int16
                     )
-                    self._stream.start()
-                self._stream.write(np.frombuffer(audio_data, dtype=np.int16))
-
-        try:
-            await asyncio.gather(_synthesize_loop(), _playback_loop())
+                    stream.start()
+                samples = np.frombuffer(audio_data, dtype=np.int16)
+                step = max(1, int(sample_rate * self._config.playback_chunk_ms / 1000)) * channels
+                for start in range(0, len(samples), step):
+                    if self._stop_event.is_set():
+                        break
+                    tracer.mark(AUDIO_FIRST_WRITE)
+                    stream.write(samples[start:start + step])
         finally:
-            if self._stream:
-                self._stream.stop()
-                self._stream.close()
-                self._stream = None
+            if stream is not None:
+                if self._stop_event.is_set():
+                    stream.abort()  # flush buffered samples immediately (barge-in)
+                else:
+                    stream.stop()
+                stream.close()
 
     async def _synthesize(self, client: httpx.AsyncClient, text: str) -> bytes | None:
         try:
@@ -97,10 +145,55 @@ class TTSClient:
         except wave.Error:
             return None
 
-    async def _iter_sentences(self, queue: asyncio.Queue):
+    async def _iter_hybrid(self, token_queue: asyncio.Queue):
+        """Emit the first chunk early, then revert to sentence granularity (P1-1).
+
+        The opener is whichever lands first as tokens stream: a clause boundary
+        (, ; : . ? !) or first_chunk_max_words complete words. That starts audio
+        well before a full sentence exists, while every later chunk stays
+        sentence-sized so Piper prosody isn't globally degraded.
+        """
+        cap = self._config.first_chunk_max_words
+        buffer = ""
+        first_done = False
+        while True:
+            chunk = await token_queue.get()
+            if chunk is None:
+                break
+            buffer += chunk
+
+            if not first_done:
+                match = self.CLAUSE_END.search(buffer)
+                if match:
+                    head = buffer[: match.end()].strip()
+                    if head:
+                        yield head
+                        buffer = buffer[match.end():]
+                        first_done = True
+                    continue
+                words = buffer.split()
+                if len(words) > cap:
+                    yield " ".join(words[:cap])
+                    buffer = " ".join(words[cap:])
+                    first_done = True
+                continue
+
+            sentences = self.SENTENCE_END.split(buffer)
+            if len(sentences) > 1:
+                buffer = sentences[-1]
+                for sentence in sentences[:-1]:
+                    sentence = sentence.strip()
+                    if sentence:
+                        yield sentence
+
+        remaining = buffer.strip()
+        if remaining:
+            yield remaining
+
+    async def _iter_sentences(self, token_queue: asyncio.Queue):
         buffer = ""
         while True:
-            chunk = await queue.get()
+            chunk = await token_queue.get()
             if chunk is None:
                 break
             buffer += chunk
@@ -115,11 +208,11 @@ class TTSClient:
         if remaining:
             yield remaining
 
-    async def _iter_chars(self, queue: asyncio.Queue):
+    async def _iter_chars(self, token_queue: asyncio.Queue):
         buffer = ""
         size = self._config.chunk_size
         while True:
-            chunk = await queue.get()
+            chunk = await token_queue.get()
             if chunk is None:
                 break
             buffer += chunk
@@ -129,11 +222,11 @@ class TTSClient:
         if buffer:
             yield buffer
 
-    async def _iter_words(self, queue: asyncio.Queue):
+    async def _iter_words(self, token_queue: asyncio.Queue):
         buffer = ""
         size = self._config.chunk_size
         while True:
-            chunk = await queue.get()
+            chunk = await token_queue.get()
             if chunk is None:
                 break
             buffer += chunk
@@ -151,16 +244,16 @@ class TTSClient:
 
 async def main():
     client = TTSClient(TTSClientConfig())
-    queue = asyncio.Queue()
+    token_queue = asyncio.Queue()
     for text in [
         "Hello, this is the first sentence.",
         "And here is another one.",
         "Finally, a third sentence to synthesize.",
     ]:
-        await queue.put(text)
-    await queue.put(None)
+        await token_queue.put(text)
+    await token_queue.put(None)
 
-    await client.play(queue)
+    await client.play(token_queue)
     client.close()
 
 

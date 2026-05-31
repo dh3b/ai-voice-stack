@@ -3,10 +3,23 @@ from numpy import int16
 from typing import Literal
 
 
+# Per-stage latency instrumentation (P0-1). When True, the pipeline prints the
+# inter-stage durations of each turn (endpoint -> first LLM token -> first synth
+# chunk -> first audio out). Set to False to silence the timing output.
+DEBUG_LATENCY: bool = True
+
+# Confirmation earcons (P1-5): short tones after the wakeword and after speech
+# endpointing, masking the LLM time-to-first-token silence. Set False to disable.
+ENABLE_EARCONS: bool = True
+
+
 @dataclass
 class LLMClientConfig:
-    agent_model_path: str = "./models/gemma-4-E4B-it-Q4_K_M.gguf"
-    chatbot_model_path: str = "./models/gemma-4-E4B-it-Q4_K_M.gguf"
+    # llama-server is launched with a fixed model (modules/server/llm_server.py)
+    # and IGNORES the `model` field in requests, so these are informational only
+    # and must match whatever the server actually serves. Currently Qwen2.5-3B.
+    agent_model_path: str = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+    chatbot_model_path: str = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
     system_instructions: str = (
         "Respond in plain spoken prose only - no markdown, bullet points, headers, bold, "
         "emojis, or special characters. Keep responses short: 10-30 seconds of speaking "
@@ -15,6 +28,9 @@ class LLMClientConfig:
     temperature: float = 0.6
     max_iterations: int = 10
     mode: Literal["agent", "chatbot"] = "agent"
+    # Overall budget for one LLM turn (including any agentic tool iterations).
+    # A stalled or hung stream is cancelled past this so it can't wedge the turn.
+    response_timeout: float = 60.0
 
 
 @dataclass
@@ -50,5 +66,13 @@ class TTSClientConfig:
     length_scale: float = 1.5
     noise_scale: float = 1.0
     noise_w_scale: float = 0.5
-    chunk_mode: Literal["sentence", "chars", "words"] = "sentence"
+    chunk_mode: Literal["hybrid", "sentence", "chars", "words"] = "hybrid"
     chunk_size: int = 3
+    # P1-1 hybrid first-chunk: emit the very first audio as soon as the first
+    # clause boundary OR this many words is reached (whichever comes first), then
+    # revert to sentence granularity. Cuts time-to-first-audio without globally
+    # degrading Piper prosody. Only affects chunk_mode="hybrid".
+    first_chunk_max_words: int = 5
+    # Granularity of blocking writes on the playback thread, in milliseconds. This
+    # is the barge-in latency knob: smaller = faster interrupt, more write calls.
+    playback_chunk_ms: int = 20

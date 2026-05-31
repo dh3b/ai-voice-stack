@@ -6,6 +6,7 @@ from openai import AsyncOpenAI
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # temporary
 from config import LLMClientConfig
 from modules.utility.tool_registry import registry
+from modules.utility.latency import tracer, LLM_FIRST_TOKEN
 
 
 class LLMClient:
@@ -37,6 +38,7 @@ class LLMClient:
         async for event in stream:
             chunk = event.choices[0].delta.content
             if isinstance(chunk, str):
+                tracer.mark(LLM_FIRST_TOKEN)
                 if queue:
                     await queue.put(chunk)
                 print(chunk, end="", flush=True)
@@ -70,6 +72,7 @@ class LLMClient:
                     continue  # first event is null
 
                 if delta.content:
+                    tracer.mark(LLM_FIRST_TOKEN)
                     response_content += delta.content
                     if queue:
                         await queue.put(delta.content)
