@@ -22,6 +22,11 @@ def start_server(config: STTServerConfig) -> subprocess.Popen:
         "--vac",                  # Silero VAD, fires is_final
         "--min-chunk-size", str(config.min_chunk_size),
     ]
+
+    if AppConfig().warmup_on_init:
+        cmd.append("--warmup-file")
+        cmd.append(config.warmup_audio_path)
+
     logger.info(f"Starting:{' '.join(cmd)}")
     return subprocess.Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
 

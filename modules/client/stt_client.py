@@ -17,6 +17,9 @@ class STTClient:
     def __init__(self, config: STTClientConfig):
         self._config = config
 
+        if AppConfig().warmup_on_init:
+            logger.debug("warmed up.") # I hope so
+
     async def run(self, transcript_queue: asyncio.Queue):
         try:
             reader, writer = await asyncio.open_connection(

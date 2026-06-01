@@ -50,7 +50,7 @@ class TTSClient:
                     timeout=60.0,
                 )
                 resp.raise_for_status()
-            logger.debug("Piper warmed up.")
+            logger.debug("warmed up.")
         except Exception as e:
             logger.warning(f"warmup skipped ({e!r}); first synth may be cold.")
 

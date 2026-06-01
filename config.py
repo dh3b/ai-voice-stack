@@ -61,6 +61,7 @@ class STTServerConfig:
     model_path: str = "C:/Users/user/Documents/Projects/python/ai-voice-stack/models/whisper-base.pt"
     language: str = "auto"
     min_chunk_size: int = 1 # process every ~1s of audio
+    warmup_audio_path: str = "./assets/stt_warmup.wav" # if warmup is enabled
 
 
 @dataclass

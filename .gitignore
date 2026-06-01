@@ -5,4 +5,5 @@
 /temp
 /logs
 /llama_cpp_bin
+/simulstreaming_lib
 __pycache__/
