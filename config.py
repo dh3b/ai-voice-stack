@@ -7,6 +7,7 @@ from logging import INFO, DEBUG, WARNING, ERROR, CRITICAL
 class AppConfig:
     enable_earcons: bool = True
     warmup_on_init: bool = True
+    continuation_enabled: bool = True  # after TTS, listen for a follow-up without requiring the wakeword
     logging_format: str = "%(asctime)s %(levelname)s [%(name)s]: %(message)s"
     logging_level: int = INFO
     disable_http_logging: bool = True # set to True to reduce noise from httpx and openai client logs
@@ -73,6 +74,7 @@ class STTClientConfig:
     dtype: type = int16
     block_size: int = 4000  # 250ms chunks
     response_timeout: float = 5.0  # max seconds to wait for speech before aborting
+    continuation_timeout: float = 3.0  # max seconds to wait for a follow-up after TTS before requiring the wakeword again
 
 
 @dataclass

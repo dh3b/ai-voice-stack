@@ -20,7 +20,10 @@ class STTClient:
         if AppConfig().warmup_on_init:
             logger.debug("warmed up.") # I hope so
 
-    async def run(self, transcript_queue: asyncio.Queue):
+    async def run(self, transcript_queue: asyncio.Queue, listen_timeout: float | None = None):
+        if listen_timeout is None:
+            listen_timeout = self._config.response_timeout
+
         try:
             reader, writer = await asyncio.open_connection(
                 self._config.server_host, self._config.server_port
@@ -37,7 +40,7 @@ class STTClient:
         try:
             await asyncio.gather(
                 self._stream_mic_to_server(writer, stop_event),
-                self._read_transcripts(reader, transcript_queue, stop_event),
+                self._read_transcripts(reader, transcript_queue, stop_event, listen_timeout),
             )
         except KeyboardInterrupt:
             logger.info("Stopping...")
@@ -73,16 +76,16 @@ class STTClient:
         writer.close()
         await writer.wait_closed()
 
-    async def _read_transcripts(self, reader: asyncio.StreamReader, transcript_queue: asyncio.Queue, stop_event: asyncio.Event):
+    async def _read_transcripts(self, reader: asyncio.StreamReader, transcript_queue: asyncio.Queue, stop_event: asyncio.Event, listen_timeout: float):
         confirmed_text = []
-        deadline = asyncio.get_event_loop().time() + self._config.response_timeout
+        deadline = asyncio.get_event_loop().time() + listen_timeout
         got_first_partial = False
 
         while not stop_event.is_set():
             if not got_first_partial:
                 now = asyncio.get_event_loop().time()
                 if now >= deadline:
-                    logger.info(f"No speech detected within {self._config.response_timeout}s")
+                    logger.info(f"No speech detected within {listen_timeout}s")
                     await transcript_queue.put("")
                     stop_event.set()
                     break

@@ -86,7 +86,8 @@ async def run_turn_with_bargein(transcript: str) -> bool:
 
 async def main():
     transcript_queue: asyncio.Queue[str] = asyncio.Queue()
-    skip_wakeword = False  # set after a barge-in
+    skip_wakeword = False  # set after a barge-in or to enter continuation listening
+    listen_timeout = None  # None => default response_timeout; set => continuation follow-up window
 
     while True:
         if not skip_wakeword:
@@ -95,14 +96,21 @@ async def main():
 
         earcon.play(earcon.WAKE_ACK)
 
-        logger.info("Wakeword detected. Starting STT...")
+        if listen_timeout is None:
+            logger.info("Wakeword detected. Starting STT...")
+        else:
+            logger.info(f"Listening for a follow-up ({listen_timeout}s, no wakeword)...")
         tracer.reset()
-        await stt_client.run(transcript_queue)
+        await stt_client.run(transcript_queue, listen_timeout=listen_timeout)
+        in_continuation = listen_timeout is not None
+        listen_timeout = None
 
         transcript = await transcript_queue.get()
         logger.info(f"Transcript: {transcript}")
 
         if not transcript:
+            if in_continuation:
+                logger.info("No follow-up within the window; returning to wakeword.")
             continue
 
         logger.info("Starting LLM/TTS turn...")
@@ -116,6 +124,10 @@ async def main():
         if interrupted:
             logger.info("Barge-in: re-listening immediately.")
             skip_wakeword = True
+        elif app_config.continuation_enabled:
+            logger.info(f"Continuation: listening for a follow-up ({stt_cfg.continuation_timeout}s)...")
+            skip_wakeword = True
+            listen_timeout = stt_cfg.continuation_timeout
 
 
 if __name__ == "__main__":
