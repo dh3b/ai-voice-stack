@@ -33,6 +33,7 @@ def _tone(segments: list[tuple[float, float]], volume: float = 0.18) -> np.ndarr
 
 WAKE_ACK = _tone([(660, 70), (990, 90)])
 ENDPOINT_ACK = _tone([(880, 90)])
+ENDPOINT_NACK = _tone([(440, 90), (330, 120)])
 
 
 def play(sound: np.ndarray) -> None:

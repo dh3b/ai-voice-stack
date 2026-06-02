@@ -109,6 +109,7 @@ async def main():
         logger.info(f"Transcript: {transcript}")
 
         if not transcript:
+            earcon.play(earcon.ENDPOINT_NACK)
             if in_continuation:
                 logger.info("No follow-up within the window; returning to wakeword.")
             continue
