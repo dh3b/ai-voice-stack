@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # temporary
 from config import LLMClientConfig, AppConfig
-from modules.utility.tool_registry import registry
+from modules.tools import registry
 from modules.utility.latency import tracer, LLM_FIRST_TOKEN
 
 logger = logging.getLogger("voice_stack.llm")
