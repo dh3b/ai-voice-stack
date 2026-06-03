@@ -143,4 +143,4 @@ MIT
 
 ## Credits
 
-Huge thanks to ÚFAL, for releasing the opensource [SimulStreaming](github.com/ufal/SimulStreaming) repository. This project wouldn't be half as efficient without them.
+Huge thanks to ÚFAL, for releasing the opensource [SimulStreaming](https://github.com/ufal/SimulStreaming) repository. This project wouldn't be half as efficient without them.
