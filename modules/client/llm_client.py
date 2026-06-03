@@ -2,11 +2,9 @@ import asyncio
 import logging
 import time
 import sys
-from pathlib import Path
 import httpx
 from openai import AsyncOpenAI
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # temporary
 from config import LLMClientConfig, ToolsConfig, AppConfig
 from modules.tools import registry, load_modules
 from modules.utility.latency import tracer, LLM_FIRST_TOKEN

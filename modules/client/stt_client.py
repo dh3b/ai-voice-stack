@@ -1,12 +1,10 @@
 import asyncio
 import json
 import logging
-from pathlib import Path
 import sys
 import numpy as np
 import sounddevice as sd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import STTClientConfig, AppConfig
 from modules.utility.latency import tracer, ENDPOINT_FINAL
 

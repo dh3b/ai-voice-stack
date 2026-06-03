@@ -1,12 +1,9 @@
 import logging
-from pathlib import Path
 import sys
 import signal
 import subprocess
-import sys
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import LLMServerConfig, AppConfig
 
 logger = logging.getLogger("llm_server")

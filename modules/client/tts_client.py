@@ -6,13 +6,10 @@ import re
 import threading
 import wave
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
-import sys
 import httpx
 import numpy as np
 import sounddevice as sd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import TTSClientConfig, AppConfig
 from modules.utility.latency import tracer, TTS_FIRST_CHUNK, AUDIO_FIRST_WRITE
 

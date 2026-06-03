@@ -1,13 +1,10 @@
 import asyncio
 import logging
 import threading
-from pathlib import Path
-import sys
 import numpy as np
 import sounddevice as sd
 from openwakeword.model import Model
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import OWWClientConfig, AppConfig
 
 logger = logging.getLogger("voice_stack.oww")
