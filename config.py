@@ -7,7 +7,7 @@ from logging import INFO, DEBUG, WARNING, ERROR, CRITICAL
 class AppConfig:
     enable_earcons: bool = True
     warmup_on_init: bool = True
-    continuation_enabled: bool = True  # after TTS, listen for a follow-up without requiring the wakeword
+    continuation_enabled: bool = True
     logging_format: str = "%(asctime)s %(levelname)s [%(name)s]: %(message)s"
     logging_level: int = INFO
     disable_http_logging: bool = True # set to True to reduce noise from httpx and openai client logs
@@ -15,6 +15,7 @@ class AppConfig:
 
 @dataclass
 class LLMServerConfig:
+    executable_path: str = "llama_cpp_bin/llama-server.exe"
     model_path: str = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
     server_host: str = "127.0.0.1"
     server_port: int = 43001
@@ -61,7 +62,7 @@ class ToolsConfig:
 class OWWClientConfig:
     model_paths: list[str] = field(
         default_factory=lambda: [
-            "C:/Users/user/Documents/Projects/python/ai-voice-stack/models/hey_jarvis_v0.1.onnx",
+            "./models/hey_jarvis_v0.1.onnx",
         ]
     )
     framework: str = "onnx"
@@ -76,7 +77,7 @@ class OWWClientConfig:
 class STTServerConfig:
     server_host: str = "127.0.0.1"
     server_port: int = 43002
-    model_path: str = "C:/Users/user/Documents/Projects/python/ai-voice-stack/models/whisper-base.pt"
+    model_path: str = "./models/whisper-base.pt"
     language: str = "auto"
     min_chunk_size: int = 1 # process every ~1s of audio
     warmup_audio_path: str = "./assets/stt_warmup.wav" # if warmup is enabled
@@ -90,8 +91,8 @@ class STTClientConfig:
     channels: int = 1
     dtype: type = int16
     block_size: int = 4000  # 250ms chunks
-    response_timeout: float = 5.0  # max seconds to wait for speech before aborting
-    continuation_timeout: float = 3.0  # max seconds to wait for a follow-up after TTS before requiring the wakeword again
+    response_timeout: float = 5.0
+    continuation_timeout: float = 3.0
 
 
 @dataclass

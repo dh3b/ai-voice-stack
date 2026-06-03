@@ -10,7 +10,7 @@ logger = logging.getLogger("llm_server")
 
 def start_server(config: LLMServerConfig) -> subprocess.Popen:
     cmd = [
-        "llama_cpp_bin/llama-server.exe",
+        config.executable_path,
         "-m", config.model_path,
         "--host", config.server_host,
         "--port", str(config.server_port),

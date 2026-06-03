@@ -1,0 +1,8 @@
+openai==2.37.0
+httpx==0.28.1
+sounddevice==0.5.5
+openwakeword==0.6.0
+piper-tts[http]==1.4.2
+tzdata==2026.2
+
+numpy # version dependent on torch
