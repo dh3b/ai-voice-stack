@@ -28,8 +28,8 @@ class LLMClientConfig:
     server_port: int = LLMServerConfig.server_port
     system_instructions: str = (
         "Respond in plain spoken prose only - no markdown, bullet points, headers, bold, "
-        "emojis, or special characters. Keep responses short: 10-30 seconds of speaking "
-        "time, scaled to task complexity. Saying I don't know is rewarded, but rambling is not. "
+        "emojis, or special characters. Keep responses up to 60 seconds of speaking "
+        "time, scaled to task complexity. "
     )
     temperature: float = 0.6
     max_iterations: int = 10
@@ -38,6 +38,23 @@ class LLMClientConfig:
     history_enabled: bool = True
     history_max_turns: int = 3
     history_idle_timeout_s: float = 120.0
+
+
+@dataclass
+class ToolsConfig:
+    enabled_tool_modules: list[str] = field(
+        default_factory=lambda: ["math_tools", "datetime_tools", "random_tools", "memory_tools"]
+    )
+    # Appended to LLMClientConfig.system_instructions only when "memory_tools" is enabled above.
+    memory_system_instructions: str = (
+        "You have persistent memory tools. Use store_memory to save facts the user shares "
+        "about themselves (name, preferences, recurring topics, important dates), proactively "
+        "and without being asked. Whenever the user asks about themselves or their preferences, "
+        "or refers to anything they may have told you before, call recall_memory first and "
+        "answer from what it returns. Never say you don't know a personal detail without "
+        "searching memory first."
+    )
+    memory_db_path: str = "./assets/memory.db"
 
 
 @dataclass

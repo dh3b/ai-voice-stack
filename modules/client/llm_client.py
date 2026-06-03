@@ -7,16 +7,25 @@ import httpx
 from openai import AsyncOpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # temporary
-from config import LLMClientConfig, AppConfig
-from modules.tools import registry
+from config import LLMClientConfig, ToolsConfig, AppConfig
+from modules.tools import registry, load_modules
 from modules.utility.latency import tracer, LLM_FIRST_TOKEN
 
 logger = logging.getLogger("voice_stack.llm")
 
 
 class LLMClient:
-    def __init__(self, llm_client_config: LLMClientConfig):
+    def __init__(self, llm_client_config: LLMClientConfig, tools_config: ToolsConfig | None = None):
         self._config = llm_client_config
+        self._tools_config = tools_config if tools_config is not None else ToolsConfig()
+        load_modules(self._tools_config.enabled_tool_modules)
+        # Memory's prompt guidance is only appended when its tools are actually loaded.
+        self._system_instructions = self._config.system_instructions
+        if "memory_tools" in self._tools_config.enabled_tool_modules:
+            self._system_instructions = (
+                f"{self._config.system_instructions} "
+                f"{self._tools_config.memory_system_instructions}"
+            )
         self._base_url = f"http://{self._config.server_host}:{str(self._config.server_port)}/v1"
         self._client = AsyncOpenAI(base_url=self._base_url, api_key="none")
         self._history: list[dict] = []
@@ -32,7 +41,7 @@ class LLMClient:
             payload = {
                 "model": self._config.model_path,
                 "messages": [
-                    {"role": "system", "content": self._config.system_instructions},
+                    {"role": "system", "content": self._system_instructions},
                     {"role": "user", "content": "Hi"},
                 ],
                 "max_tokens": 1,
@@ -52,7 +61,7 @@ class LLMClient:
     async def run(self, user_message: str, queue: asyncio.Queue | None = None):
         if not self._config.history_enabled:
             messages = [
-                {"role": "system", "content": self._config.system_instructions},
+                {"role": "system", "content": self._system_instructions},
                 {"role": "user", "content": user_message},
             ]
             if self._config.mode == "agent":
@@ -69,7 +78,7 @@ class LLMClient:
 
         # Seed system message once (keeps KV prefix stable)
         if not self._history:
-            self._history.append({"role": "system", "content": self._config.system_instructions})
+            self._history.append({"role": "system", "content": self._system_instructions})
 
         # Working copy carries user + any in-turn tool messages; _history gets only spoken text
         working = list(self._history) + [{"role": "user", "content": user_message}]

@@ -24,11 +24,12 @@ oww_cfg = cfg.OWWClientConfig()
 stt_cfg = cfg.STTClientConfig()
 tts_cfg = cfg.TTSClientConfig()
 llm_cfg = cfg.LLMClientConfig()
+tools_cfg = cfg.ToolsConfig()
 
 oww_client = OWWClient(oww_cfg)
 stt_client = STTClient(stt_cfg)
 tts_client = TTSClient(tts_cfg)
-llm_client = LLMClient(llm_cfg)
+llm_client = LLMClient(llm_cfg, tools_cfg)
 
 
 async def run_turn(transcript: str) -> None:
