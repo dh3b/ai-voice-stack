@@ -1,0 +1,2 @@
+piper-tts[http]==1.4.2
+pydantic-settings>=2.4,<3

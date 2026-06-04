@@ -1,0 +1,32 @@
+services:
+  llm_server:
+    build:
+      dockerfile: docker/llm/Dockerfile.cuda
+      args:
+        CUDA_ARCH: "89"        # 87 for Jetson Orin; 86 Ampere; 80 A100; 75 Turing
+    environment:
+      LLM_N_GPU_LAYERS: 99     # offload all layers to the GPU
+      LLM_FLASH_ATTN: "true"   # llama-server -fa on
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  stt_server:
+    build:
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu121
+    environment:
+      # Non-CUDA base image: tell the toolkit to inject the driver + expose GPUs.
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

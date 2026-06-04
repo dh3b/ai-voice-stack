@@ -23,6 +23,8 @@ A turn runs left to right: the wake word listener (openwakeword) triggers on loa
 The LLM server invokes `llama_cpp_bin/llama-server.exe`; on Linux use your platform's binary name and change it in config (see [installation](#installation)).
 
 ## <a name="installation"></a>Installation
+> [!WARNING]
+> Although a manual installation is still maintaned possible, I highly recommend a much simpler installation with [docker](#docker)
 
 1. Clone and install the app layer:
 
@@ -48,16 +50,7 @@ The LLM server invokes `llama_cpp_bin/llama-server.exe`; on Linux use your platf
 
 3. llama.cpp. Build `llama-server` from source or download a prebuilt binary, and place it in `llama_cpp_bin/`. (`modules/server/llm_server.py` calls `llama_cpp_bin/llama-server.exe` - adjust the name for your platform). For more installation instructions just visit the [llama.cpp](https://github.com/ggml-org/llama.cpp) repo.
 
-4. Models. Download into `models/`:
-
-   | Model example | File(s) example | Used for |
-   |---|---|---|
-   | Qwen2.5-3B-Instruct (Q4_K_M GGUF) | `Qwen2.5-3B-Instruct-Q4_K_M.gguf` | the LLM - replies and tool calls |
-   | Whisper base | `whisper-base.pt` | speech-to-text |
-   | Piper en_US-lessac-medium | `en_US-lessac-medium.onnx` (+ `.onnx.json`) | text-to-speech |
-   | openwakeword "hey jarvis" | `hey_jarvis_v0.1.onnx` | wake word |
-
-   Any GGUF chat model with tool-calling can replace Qwen, set its path in config.
+4. Models. Download into `models/`, see [models reference](#mdl_ref)
 
 ### Run
 
@@ -70,39 +63,87 @@ python -m modules.server.tts_server
 python pipeline.py
 ```
 
-## Configuration
+## <a name="docker"></a>Running with Docker 
 
-Everything lives in `config.py` as per-component dataclasses; edit the defaults there. The settings you are most likely to change:
+The whole stack runs as four containers wired over a private Compose network:
 
-```python
-AppConfig.enable_earcons         # audio ack/nack sound cues
-AppConfig.continuation_enabled   # keep listening for a follow-up after each reply
-AppConfig.warmup_on_init         # warm the models on startup
+| Service | Image builds | Port | Notes |
+|---|---|---|---|
+| `llm_server` | llama.cpp `llama-server` | `:43001` |  the llama.cpp build |
+| `stt_server` | torch + SimulStreaming-lite | `:43002` | the Whisper/torch stack |
+| `tts_server` | piper-tts | `:43003` | |
+| `main` | the pipeline | — | wakeword + orchestration; the only container that uses the mic/speaker |
 
-LLMClientConfig.mode             # "agent" (tool-calling) or "chatbot"
-LLMClientConfig.system_instructions
-LLMClientConfig.temperature
-LLMClientConfig.max_iterations   # max tool-call rounds per turn
-LLMClientConfig.response_timeout # max seconds to wait for a response before aborting the turn
-LLMClientConfig.history_enabled  # Whether to enable chat history (current session only)
-LLMClientConfig.history_max_turns # How much messages (ai-user pairs) aback should the history store
-LLMClientConfig.history_idle_timeout_s # After how much seconds should the earliest message be wiped from memory
+Models and `assets/` are **bind-mounted**, not baked into the images, so images stay small and you can swap models without rebuilding.
 
-ToolsConfig.enabled_tool_modules # which tool modules to load
-ToolsConfig.memory_db_path       # SQLite file backing persistent memory
+### Prerequisites
+- Docker Engine + Compose v2.
+- The models in `models/` and `assets/`. See [models reference](#mdl_ref)]
+- A viable config located in `.env`, following the `.env.example` file
 
-OWWClientConfig.model_paths      # wake word .onnx model(s)
-OWWClientConfig.threshold        # detection sensitivity, 0-1
+### Quick start (CPU, any platform)
 
-STTServerConfig.model_path       # Whisper checkpoint
-STTServerConfig.language         # "auto" or an ISO code
-STTServerConfig.response_timeout # default window, seconds
-STTClientConfig.continuation_timeout   # follow-up window, seconds
-
-TTSClientConfig.length_scale     # speech rate (higher is slower)
+```
+docker compose up --build
 ```
 
-Model paths and server addresses (LLM `:43001`, STT `:43002`, TTS `:43003`) are defined here too.
+The first build compiles llama.cpp and installs torch, so it takes a while; later rebuilds are cached. `main` waits (via healthchecks) until the three servers are ready.
+
+### NVIDIA GPU (x86 + discrete GPU)
+
+Needs the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). Layer the GPU override:
+
+```
+docker compose -f docker-compose.yml -f docker-compose.cuda.yml up --build
+```
+
+This swaps `llm_server` to the CUDA build (offloading all layers, `LLM_N_GPU_LAYERS=99`), builds the STT torch wheels from the CUDA index, and reserves the GPU. Set the GPU architecture with the `CUDA_ARCH` build arg in `docker-compose.cuda.yml` (`89` Ada, `86` Ampere, `80` A100, `75` Turing).
+
+### Jetson (Orin)
+
+Jetson needs JetPack-specific CUDA wheels and bases, so override the build args (in `docker-compose.cuda.yml` or on the CLI):
+
+- `llm_server` -> `docker/llm/Dockerfile.cuda` with `CUDA_ARCH=87`, and L4T CUDA bases via `CUDA_DEVEL_IMAGE` / `CUDA_RUNTIME_IMAGE` set to your JetPack's `l4t-cuda` devel/runtime images.
+- `stt_server` -> `TORCH_INDEX_URL` pointing at NVIDIA's JetPack PyTorch index (cu126 for JetPack 6.x); keep `numpy<2` (already pinned in the image).
+
+
+### Raspberry Pi / other ARM64 (CPU)
+
+Use the base (CPU) compose, but build the STT image's torch from the default PyPI aarch64 wheels by passing an empty index:
+
+```
+docker compose build --build-arg TORCH_INDEX_URL= stt_server
+docker compose up
+```
+
+Expect modest speeds, as with the native Pi setup.
+
+### Audio on Windows / macOS
+
+`main` does live mic/speaker I/O via `/dev/snd`, which **only exists on Linux**; Docker Desktop can't pass the host audio device through on Windows/macOS. So on those hosts, run the **servers** in Docker and the **pipeline** on the host:
+
+```
+docker compose up -d llm_server stt_server tts_server
+pip install -e . && pip install -r requirements.txt
+python pipeline.py                                      
+```
+
+The servers publish to `127.0.0.1:43001-43003` and `pipeline.py`'s defaults already point at `127.0.0.1`, so no extra config is needed.
+
+## <a name="mdl_ref"></a>Model reference
+
+   | Model example | File(s) example | Used for |
+   |---|---|---|
+   | Qwen2.5-3B-Instruct (Q4_K_M GGUF) | `Qwen2.5-3B-Instruct-Q4_K_M.gguf` | the LLM - replies and tool calls |
+   | Whisper base | `whisper-base.pt` | speech-to-text |
+   | Piper en_US-lessac-medium | `en_US-lessac-medium.onnx` (+ `.onnx.json`) | text-to-speech |
+   | openwakeword "hey jarvis" | `hey_jarvis_v0.1.onnx` | wake word |
+
+   Any GGUF chat model with tool-calling can replace Qwen, set its path in config. Everything else that's not a model is located in `assets/`. `stt_warmup.wav` is already provided, but feel free to switch up the file.
+
+## Configuration
+
+Everything lives in `.env`, edit the defaults there (copy the `.env.example` first). This section would be too large to explain every detail of config, so please consult the [config help](CONFIG_HELP.md) doc.
 
 ## Adding a tool
 

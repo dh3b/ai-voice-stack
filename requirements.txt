@@ -4,5 +4,7 @@ sounddevice==0.5.5
 openwakeword==0.6.0
 piper-tts[http]==1.4.2
 tzdata==2026.2
+pydantic-settings>=2.4,<3   # env-driven config (config.py)
+python-dotenv==1.0.1        # loads .env for native runs (config.py); optional
 
 numpy # version dependent on torch

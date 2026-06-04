@@ -1,0 +1,43 @@
+ARG CUDA_DEVEL_IMAGE=nvidia/cuda:12.6.2-devel-ubuntu22.04
+ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:12.6.2-runtime-ubuntu22.04
+ARG LLAMA_CPP_REF=
+
+# builder
+FROM ${CUDA_DEVEL_IMAGE} AS builder
+ARG CUDA_ARCH=89
+ARG LLAMA_CPP_REF
+ENV CUDACXX=/usr/local/cuda/bin/nvcc
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git cmake build-essential libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git clone https://github.com/ggml-org/llama.cpp \
+    && cd llama.cpp \
+    && if [ -n "$LLAMA_CPP_REF" ]; then git checkout "$LLAMA_CPP_REF"; fi \
+    && cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_CUDA=ON \
+        -DGGML_CUDA_F16=ON \
+        -DLLAMA_CURL=ON \
+        -DGGML_CUDA_FA_ALL_QUANTS=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" \
+    && cmake --build build --config Release --target llama-server -j
+
+# runtime
+FROM ${CUDA_RUNTIME_IMAGE}
+# python3 + pip for the supervisor/config (pydantic-settings); libgomp1 + libcurl4 for llama-server.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip libgomp1 libcurl4 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python \
+    && pip3 install --no-cache-dir "pydantic-settings>=2.4,<3"
+# CUDA build links ggml backends as shared libs alongside the binary, copy them all.
+COPY --from=builder /src/llama.cpp/build/bin/ /opt/llama/bin/
+ENV LD_LIBRARY_PATH=/opt/llama/bin
+ENV LLM_EXECUTABLE_PATH=/opt/llama/bin/llama-server
+WORKDIR /app
+COPY config.py ./config.py
+COPY modules/__init__.py ./modules/__init__.py
+COPY modules/server/__init__.py ./modules/server/__init__.py
+COPY modules/server/llm_server.py ./modules/server/llm_server.py
+CMD ["python", "-m", "modules.server.llm_server"]

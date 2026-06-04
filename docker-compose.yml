@@ -1,0 +1,90 @@
+x-svc: &svc
+  restart: unless-stopped
+  init: true
+  networks: [voicenet]
+  env_file:
+    - path: .env.example
+    - path: .env
+      required: false
+
+services:
+  llm_server:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/llm/Dockerfile.cpu
+    environment:
+      LLM_EXECUTABLE_PATH: /opt/llama/bin/llama-server   # binary path inside the image
+      LLM_BIND_HOST: 0.0.0.0                             # listen on all interfaces in the container
+    volumes:
+      - ./models:/app/models:ro
+    ports:
+      - "127.0.0.1:43001:43001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:43001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+
+  stt_server:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/stt/Dockerfile
+    environment:
+      STT_BIND_HOST: 0.0.0.0
+    volumes:
+      - ./models:/app/models:ro
+      - ./assets:/app/assets:ro
+    ports:
+      - "127.0.0.1:43002:43002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',43002),3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 240s
+
+  tts_server:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/tts/Dockerfile
+    environment:
+      TTS_BIND_HOST: 0.0.0.0
+    volumes:
+      - ./models:/app/models:ro
+    ports:
+      - "127.0.0.1:43003:43003"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',43003),3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  main:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/main/Dockerfile
+    depends_on:
+      llm_server: {condition: service_healthy}
+      stt_server: {condition: service_healthy}
+      tts_server: {condition: service_healthy}
+    environment:                          # reach each backend by its compose service name
+      LLM_SERVER_HOST: llm_server
+      STT_SERVER_HOST: stt_server
+      TTS_SERVER_HOST: tts_server
+    volumes:
+      - ./models:/app/models:ro
+      - ./assets:/app/assets
+    devices:
+      - "/dev/snd:/dev/snd"
+    group_add:
+      - audio
+
+networks:
+  voicenet:
+    driver: bridge

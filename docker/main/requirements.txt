@@ -1,0 +1,7 @@
+openai==2.37.0
+httpx==0.28.1
+sounddevice==0.5.5
+openwakeword==0.6.0
+tzdata==2026.2
+numpy<2
+pydantic-settings>=2.4,<3

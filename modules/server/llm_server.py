@@ -16,8 +16,12 @@ def start_server(config: LLMServerConfig) -> subprocess.Popen:
         "--port", str(config.server_port),
         "--jinja",
         "-c", str(config.context_window),
-        # TODO: add "-ngl", "99" (and "-fa", "on");
     ]
+
+    if config.n_gpu_layers > 0:
+        cmd += ["-ngl", str(config.n_gpu_layers)]
+    if config.flash_attn:
+        cmd += ["-fa", "on"]
 
     logger.info(f"Starting:{' '.join(cmd)}")
     return subprocess.Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
