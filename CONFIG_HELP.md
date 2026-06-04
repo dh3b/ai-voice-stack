@@ -1,7 +1,7 @@
 Every variable can be set within the `.env` file after copying the example.
 Here are some comments to help you understand what each setting does.
 
-```toml
+```env
 APP_ENABLE_EARCONS=true    # audio ack/nack sound cues
 APP_WARMUP_ON_INIT=true    # warm the models on startup
 APP_CONTINUATION_ENABLED=true    # keep listening for a follow-up after each reply
