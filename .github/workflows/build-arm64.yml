@@ -8,34 +8,31 @@ on:
 jobs:
   build-arm64:
     name: Build ARM64 image and upload artifact
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm          # native arm64, no QEMU
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Login to NVIDIA NGC (nvcr.io)
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: nvcr.io
           username: ${{ secrets.NVCR_USERNAME }}
           password: ${{ secrets.NVCR_PASSWORD }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
-      - name: Create builder
-        run: docker buildx create --use --bootstrap
-
-      - name: Build arm64 image and export tar
+      - name: Build arm64 image -> loadable tar
         run: |
           docker buildx build \
             --platform linux/arm64 \
             -f docker/llm/Dockerfile.cuda \
             -t ai-voice-stack/llm:arm64 \
-            --output type=tar,dest=llm-arm64.tar \
+            --output type=docker,dest=llm-arm64.tar \
             docker/llm
 
       - name: Upload image tar artifact
@@ -44,13 +41,10 @@ jobs:
           name: llm-arm64-image
           path: llm-arm64.tar
 
-      - name: push to dockerhub
-        if: ${{ secrets.DOCKERHUB_USERNAME && secrets.DOCKERHUB_TOKEN }}
+      - name: Push to Docker Hub (if creds present)
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          docker buildx build \
-            --platform linux/arm64 \
-            -f docker/llm/Dockerfile.cuda \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/ai-voice-stack-llm:arm64 \
-            --push \
-            docker/llm
+          docker load -i llm-arm64.tar
+          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+          docker tag ai-voice-stack/llm:arm64 "$DOCKERHUB_USERNAME/ai-voice-stack-llm:arm64"
+          docker push "$DOCKERHUB_USERNAME/ai-voice-stack-llm:arm64"
