@@ -1,7 +1,11 @@
+import os
 from dataclasses import dataclass, field
 from numpy import int16
 from typing import Literal
 from logging import INFO, DEBUG, WARNING, ERROR, CRITICAL
+
+# llama-server binary name is OS-specific; the provisioner builds it into llama_cpp_bin/.
+_LLAMA_SERVER_BIN = "llama-server.exe" if os.name == "nt" else "llama-server"
 
 @dataclass
 class AppConfig:
@@ -9,17 +13,19 @@ class AppConfig:
     warmup_on_init: bool = True
     continuation_enabled: bool = True
     logging_format: str = "%(asctime)s %(levelname)s [%(name)s]: %(message)s"
-    logging_level: int = INFO
+    logging_level: int = DEBUG
     disable_http_logging: bool = True # set to True to reduce noise from httpx and openai client logs
 
 
 @dataclass
 class LLMServerConfig:
-    executable_path: str = "llama_cpp_bin/llama-server.exe"
+    executable_path: str = f"llama_cpp_bin/{_LLAMA_SERVER_BIN}"
     model_path: str = "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
     server_host: str = "127.0.0.1"
     server_port: int = 43001
     context_window: int = 8192
+    gpu_layers: int = 0       # -ngl passed to llama-server. 0 = CPU; set 99 to offload all layers (CUDA/Metal builds).
+    flash_attn: bool = False  # adds "-fa on" when True. Recommended alongside GPU offload.
 
 
 @dataclass

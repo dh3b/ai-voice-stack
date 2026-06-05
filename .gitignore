@@ -8,6 +8,7 @@
 /assets
 /llama_cpp_bin
 /simulstreaming_lib
+/.build
 
 __pycache__/
 *.egg-info/

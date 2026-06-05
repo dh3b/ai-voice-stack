@@ -7,13 +7,23 @@ name = "ai-voice-stack"
 version = "0.0.0"
 description = "Local voice assistant stack (wakeword + STT + LLM + TTS)."
 requires-python = ">=3.10"
-# Runtime dependencies are intentionally NOT listed here; they stay in
-# requirments.txt / requirements_whisper.txt so the pinned (e.g. Jetson) torch/numpy
-# setup is untouched. This package is installed with `pip install -e .` purely to put
-# the repo root on sys.path, making `config` and `modules` importable from anywhere.
+dependencies = [
+    "openai==2.37.0",
+    "httpx==0.28.1",
+    "sounddevice==0.5.5",
+    "openwakeword==0.6.0",
+    "piper-tts[http]==1.4.2",
+    "tzdata==2026.2",
+    "numpy",  # version is left to the resolver on CPU; the provisioner pins numpy<2 for CUDA/Jetson
+]
+
+# torch / torchaudio are intentionally NOT listed here. The correct wheel depends on
+# the runtime machine (CPU index vs cuXXX vs the Jetson/JetPack index), so the
+# provisioner installs them with the detected index (installer/setup_torch.py), and
+# `uv sync --inexact` is used everywhere so syncing never strips them back out.
 
 [tool.setuptools]
 py-modules = ["config"]
 
 [tool.setuptools.packages.find]
-include = ["modules*"]
+include = ["modules*", "installer*"]
