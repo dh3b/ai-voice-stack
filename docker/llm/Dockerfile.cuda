@@ -1,10 +1,10 @@
-ARG CUDA_DEVEL_IMAGE=nvcr.io/nvidia/l4t-cuda:12.2.12-devel
-ARG CUDA_RUNTIME_IMAGE=nvcr.io/nvidia/l4t-cuda:12.6.11-runtime
+ARG CUDA_DEVEL_IMAGE=nvidia/cuda:12.6.2-devel-ubuntu22.04
+ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:12.6.2-runtime-ubuntu22.04
 ARG LLAMA_CPP_REF=
 
 # builder
 FROM ${CUDA_DEVEL_IMAGE} AS builder
-ARG CUDA_ARCH=87
+ARG CUDA_ARCH=89
 ARG LLAMA_CPP_REF
 ENV CUDACXX=/usr/local/cuda/bin/nvcc
 RUN apt-get update && apt-get install -y --no-install-recommends \
