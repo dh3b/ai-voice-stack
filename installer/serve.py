@@ -1,8 +1,7 @@
-"""`task run` supervisor: start the three backend servers (output to logs/<name>.log)
-one at a time, then run pipeline.py on the console. Tears everything down on exit."""
+"""`task run` supervisor: start the three backend servers (output to logs/<name>.log),
+wait until ready, then run pipeline.py on the console. Tears everything down on exit."""
 from __future__ import annotations
 
-import os
 import socket
 import subprocess
 import time
@@ -14,7 +13,7 @@ from typing import IO
 
 from . import util
 
-# (label, module), started in this order, each waited-on before the next.
+# (label, module) for the three backend supervisors, started in this order.
 _SERVERS = [
     ("llm", "modules.server.llm_server"),
     ("stt", "modules.server.stt_server"),
@@ -52,42 +51,10 @@ def _tail(path: Path | None, n: int = 20) -> str:
     if not path:
         return ""
     try:
-        return "\n".join(path.read_text(errors="replace").splitlines()[-n:])
+        lines = path.read_text(errors="replace").splitlines()
     except OSError:
         return ""
-
-
-def _mem() -> str:
-    """Unified-memory snapshot (Linux/Jetson). GPU shares this pool, so it's the
-    number that matters for CUDA allocations."""
-    try:
-        info = dict(
-            line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines() if ":" in line
-        )
-        avail = int(info["MemAvailable"].split()[0]) // 1024
-        free = int(info["MemFree"].split()[0]) // 1024
-        swap = int(info["SwapFree"].split()[0]) // 1024
-        total = int(info["MemTotal"].split()[0]) // 1024
-        return f"avail={avail}MB free={free}MB swapfree={swap}MB / {total}MB"
-    except (OSError, KeyError, ValueError, IndexError):
-        return "n/a"
-
-
-def _log_env() -> None:
-    """The CUDA-relevant env the child servers inherit (compare to your manual shell)."""
-    for k in ("CUDA_VISIBLE_DEVICES", "LD_LIBRARY_PATH", "CUDA_HOME", "VIRTUAL_ENV"):
-        util.logger.info("  env  %s=%s", k, os.environ.get(k, "(unset)"))
-
-
-def _ready_checks() -> dict:
-    import config as cfg  # repo-root module; importable once deps/venv are set up
-
-    llm, stt, tts = cfg.LLMServerConfig(), cfg.STTServerConfig(), cfg.TTSServerConfig()
-    return {
-        "llm": lambda: _http_ok(f"http://{llm.server_host}:{llm.server_port}/health"),
-        "stt": lambda: _port_open(stt.server_host, stt.server_port),
-        "tts": lambda: _port_open(tts.server_host, tts.server_port),
-    }
+    return "\n".join(lines[-n:])
 
 
 def _spawn_server(label: str, module: str) -> _Proc:
@@ -103,18 +70,35 @@ def _spawn_server(label: str, module: str) -> _Proc:
     return _Proc(label, popen, log_path, log_file)
 
 
-def _wait_one(proc: _Proc, check, timeout: float) -> bool:
+def _wait_ready(procs: list[_Proc], timeout: float) -> bool:
+    import config as cfg  # repo-root module; importable once deps/venv are set up
+
+    llm, stt, tts = cfg.LLMServerConfig(), cfg.STTServerConfig(), cfg.TTSServerConfig()
+    checks = {
+        "llm": lambda: _http_ok(f"http://{llm.server_host}:{llm.server_port}/health"),
+        "stt": lambda: _port_open(stt.server_host, stt.server_port),
+        "tts": lambda: _port_open(tts.server_host, tts.server_port),
+    }
+    by_label = {p.label: p for p in procs}
+    ready: set[str] = set()
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if proc.popen.poll() is not None:
-            util.logger.error("  !!   %s exited early (code %s). Last log lines:",
-                              proc.label, proc.popen.returncode)
-            util.logger.error("%s", _tail(proc.log_path))
-            return False
-        if check():
+        for label, check in checks.items():
+            if label in ready:
+                continue
+            proc = by_label.get(label)
+            if proc is not None and proc.popen.poll() is not None:
+                util.logger.error("  !!   %s server exited early (code %s). Last log lines:",
+                                  label, proc.popen.returncode)
+                util.logger.error("%s", _tail(proc.log_path))
+                return False
+            if check():
+                util.logger.info("  ok   %s ready", label)
+                ready.add(label)
+        if len(ready) == len(checks):
             return True
         time.sleep(1.0)
-    util.logger.error("  !!   timed out waiting for %s", proc.label)
+    util.logger.error("  !!   timed out waiting for: %s", ", ".join(sorted(set(checks) - ready)))
     return False
 
 
@@ -155,22 +139,19 @@ def run(ready_timeout: float = 300.0) -> int:
             rerun="task run",
         )
 
-    checks = _ready_checks()
     procs: list[_Proc] = []
     try:
-        util.logger.info("  mem  %s", _mem())
-        _log_env()
         for label, module in _SERVERS:
             util.logger.info("  start %-3s -> logs/%s_server.log", label, label)
-            proc = _spawn_server(label, module)
-            procs.append(proc)
-            if not _wait_one(proc, checks[label], ready_timeout):
-                util.fail(
-                    f"{label} server did not come up",
-                    f"See logs/{label}_server.log (tail above).\nmem at failure: {_mem()}",
-                    rerun="task run",
-                )
-            util.logger.info("  ok   %-3s ready | mem %s", label, _mem())
+            procs.append(_spawn_server(label, module))
+
+        if not _wait_ready(procs, ready_timeout):
+            util.fail(
+                "backend servers did not become ready",
+                "See the logs/ directory for details, or run `task doctor` to confirm the "
+                "models and llama-server binary are in place.",
+                rerun="task run",
+            )
 
         util.logger.info("  ok   all backends ready - starting assistant (Ctrl-C to stop)\n")
         pipeline = subprocess.Popen([util.venv_python(), "pipeline.py"], cwd=str(util.REPO_ROOT))
