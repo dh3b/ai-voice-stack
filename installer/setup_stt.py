@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 
 from . import util
+from .detect import Profile
 
 SIMUL_REPO = "https://github.com/dh3b/SimulStreaming-lite"
 SIMUL_REF = "c281b2afba55befbc77d5f7f474a80796d41478a"  # pinned; edit to bump.
@@ -36,7 +37,7 @@ def _clone() -> None:
             shutil.copy2(item, dest)
 
 
-def install(force: bool = False) -> None:
+def install(profile: Profile, force: bool = False) -> None:
     util.banner("SimulStreaming (STT backend)")
     entry = util.SIMUL_DIR / _ENTRY
 
@@ -55,5 +56,8 @@ def install(force: bool = False) -> None:
     if not reqs.exists():
         util.fail("requirements_whisper.txt missing in simulstreaming_lib", f"looked for {reqs}")
     util.logger.info("  pip  installing SimulStreaming requirements (after torch)")
-    util.run([util.uv(), "pip", "install", "-r", str(reqs)])
+    reqs_cmd = [util.uv(), "pip", "install", "-r", str(reqs)]
+    if profile.numpy_pin:
+        reqs_cmd.append(profile.numpy_pin)  # keep numpy<2 through this resolve too
+    util.run(reqs_cmd)
     util.logger.info("  ok   SimulStreaming ready")

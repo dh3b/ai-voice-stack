@@ -88,7 +88,7 @@ def cmd_setup(args) -> int:
     _uv_sync()
     _ensure_toolchain(p)  # fail-fast on a missing compiler before the build
     setup_torch.install(p, force=args.force)
-    setup_stt.install(force=args.force)
+    setup_stt.install(p, force=args.force)
     build_llama.build(p, jobs=args.jobs, force=args.force)
 
     util.logger.info("\n%s\nSetup complete.", "=" * 70)
@@ -113,7 +113,7 @@ def cmd_torch(args) -> int:
 
 
 def cmd_stt(args) -> int:
-    setup_stt.install(force=args.force)
+    setup_stt.install(detect.detect(), force=args.force)
     return 0
 
 
