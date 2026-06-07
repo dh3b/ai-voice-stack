@@ -2,7 +2,6 @@
 .vscode
 .ruff_cache
 
-/models
 /temp
 /logs
 /assets
