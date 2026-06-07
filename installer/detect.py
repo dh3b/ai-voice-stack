@@ -20,7 +20,7 @@ from . import util
 logger = logging.getLogger("installer.detect")
 
 # Jetson (Tegra/L4T) torch index for JetPack 6.x / CUDA 12.6.
-JETSON_TORCH_INDEX = "https://pypi.jetson-ai-lab.dev/jp6/cu126"
+JETSON_TORCH_INDEX = "https://pypi.jetson-ai-lab.io/jp6/cu126"
 
 # Detected CUDA version -> highest pytorch wheel tag <= it.
 _TORCH_CUDA_TAGS: list[tuple[tuple[int, int], str]] = [

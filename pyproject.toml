@@ -15,6 +15,7 @@ dependencies = [
     "piper-tts[http]==1.4.2",
     "tzdata==2026.2",
     "numpy",  # version is left to the resolver on CPU; the provisioner pins numpy<2 for CUDA/Jetson
+    "onnxruntime<1.24; python_version < '3.11'",
 ]
 
 # torch / torchaudio are intentionally NOT listed here. The correct wheel depends on
