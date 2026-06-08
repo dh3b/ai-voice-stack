@@ -45,6 +45,8 @@ task setup     # detects the machine, installs deps + torch, builds llama.cpp, f
 task run       # launches wakeword + STT + LLM + TTS
 ```
 
+If you want to use the example models, **you need to have git lfs installed**. If the models still don't work after cloning, make sure to run `git lfs pull` inside the repo.
+
 `task setup` can fail when a step genuinely can't
 self-install (typically a system C++ compiler, or a full CUDA toolkit on Windows),
 it stops with the exact command to run - fix it and re-run `task setup` to continue.
