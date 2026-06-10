@@ -1,4 +1,5 @@
 """Build llama.cpp's llama-server from source into llama_cpp_bin/."""
+
 from __future__ import annotations
 
 import os
@@ -19,8 +20,8 @@ def server_binary_path(profile: Profile) -> Path:
 def _default_jobs(profile: Profile) -> int:
     n = os.cpu_count() or 4
     if profile.is_jetson:
-        return max(1, min(4, n))   # Jetson: fewer jobs (power/thermal)
-    return max(1, min(8, n))       # cap to keep compile RAM/heat sane
+        return max(1, min(4, n))  # Jetson: fewer jobs (power/thermal)
+    return max(1, min(8, n))  # cap to keep compile RAM/heat sane
 
 
 def build(profile: Profile, *, jobs: int | None = None, force: bool = False) -> Path:
@@ -36,7 +37,7 @@ def build(profile: Profile, *, jobs: int | None = None, force: bool = False) -> 
     cmake, ninja = tools.ensure_cmake_ninja(profile)
     tools.ensure_compiler(profile)
     if profile.accel == "cuda":
-        bt = tools.ensure_cuda_build(profile)   # adds nvcc + env (+ wheel flags)
+        bt = tools.ensure_cuda_build(profile)  # adds nvcc + env (+ wheel flags)
     else:
         bt = tools.BuildTools(cmake=cmake, ninja=ninja)
 
@@ -75,7 +76,9 @@ def _clone(profile: Profile) -> Path:
     return src
 
 
-def _configure(profile: Profile, bt: tools.BuildTools, src: Path, builddir: Path) -> None:
+def _configure(
+    profile: Profile, bt: tools.BuildTools, src: Path, builddir: Path
+) -> None:
     cmd = [bt.cmake, "-S", str(src), "-B", str(builddir)]
     if bt.ninja:
         # Ninja everywhere (single-config: CMAKE_BUILD_TYPE picks Release). On Windows
@@ -83,6 +86,12 @@ def _configure(profile: Profile, bt: tools.BuildTools, src: Path, builddir: Path
         cmd += ["-G", "Ninja", f"-DCMAKE_MAKE_PROGRAM={bt.ninja}"]
     cmd += profile.llama_cmake_flags()
     cmd += bt.extra_cmake
+
+    # On Linux, override the build rpath with $ORIGIN so the binary
+    # finds its shared libs (e.g. libllama-server-impl.so) next to
+    # itself after we copy it to llama_cpp_bin/.
+    if profile.os == "linux":
+        cmd += ["-DCMAKE_BUILD_RPATH=$ORIGIN"]
 
     res = util.run(cmd, cwd=src, extra_env=bt.env, check=False)
     if res.returncode != 0 and builddir.exists():
@@ -95,7 +104,9 @@ def _configure(profile: Profile, bt: tools.BuildTools, src: Path, builddir: Path
         _stop_configure(profile)
 
 
-def _compile(profile: Profile, bt: tools.BuildTools, builddir: Path, jobs: int | None) -> None:
+def _compile(
+    profile: Profile, bt: tools.BuildTools, builddir: Path, jobs: int | None
+) -> None:
     jobs = jobs or _default_jobs(profile)
     if profile.is_jetson:
         util.logger.warning(
@@ -104,7 +115,15 @@ def _compile(profile: Profile, bt: tools.BuildTools, builddir: Path, jobs: int |
             "       --jobs and/or set a lower-power nvpmodel, then re-run.",
             jobs,
         )
-    cmd = [bt.cmake, "--build", str(builddir), "--target", "llama-server", "-j", str(jobs)]
+    cmd = [
+        bt.cmake,
+        "--build",
+        str(builddir),
+        "--target",
+        "llama-server",
+        "-j",
+        str(jobs),
+    ]
     res = util.run(cmd, extra_env=bt.env, check=False)
     if res.returncode != 0:
         _stop_compile(profile)
@@ -139,7 +158,12 @@ def _install_artifacts(profile: Profile, builddir: Path, out: Path) -> None:
             copied += 1
 
     shutil.copy2(server, out)
-    util.logger.info("  ok   installed %s (+%d shared libs) -> %s", out.name, copied, util.LLAMA_BIN_DIR)
+    util.logger.info(
+        "  ok   installed %s (+%d shared libs) -> %s",
+        out.name,
+        copied,
+        util.LLAMA_BIN_DIR,
+    )
 
 
 def _stop_configure(profile: Profile) -> None:
@@ -158,7 +182,9 @@ def _stop_configure(profile: Profile) -> None:
             "C++ build tools are installed (Desktop development with C++), then re-run.\n"
             "See the cmake output above.",
         )
-    util.fail("cmake configure failed", "See the cmake output above for the failing check.")
+    util.fail(
+        "cmake configure failed", "See the cmake output above for the failing check."
+    )
 
 
 def _stop_compile(profile: Profile) -> None:
