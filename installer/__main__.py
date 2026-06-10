@@ -5,6 +5,7 @@ hard dependency):
     uv run python -m installer setup [--force] [--jobs N]
     uv run python -m installer <torch|stt|llama|toolchain|run|clean>
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,10 +33,48 @@ def _ensure_toolchain(p) -> None:
         tools.ensure_cuda_build(p)
 
 
+def _ensure_tflite_compat() -> None:
+    """On aarch64 + Python >= 3.12, tflite-runtime has no wheel.
+    Install ai-edge-litert (which does) and create a tflite_runtime compat shim."""
+    import platform, sys as _sys, os
+
+    if platform.machine() not in ("aarch64", "arm64") or _sys.version_info < (3, 12):
+        return
+    uv = util.uv()
+    # Check if we're in a venv; if not, create one.
+    venv_py = util.venv_python()
+    venv_site = os.path.join(
+        os.path.dirname(os.path.dirname(venv_py)),
+        "lib",
+        f"python{_sys.version_info.major}.{_sys.version_info.minor}",
+        "site-packages",
+    )
+    shim_dir = os.path.join(venv_site, "tflite_runtime")
+    if os.path.exists(os.path.join(shim_dir, "interpreter.py")):
+        util.logger.info("  ok   tflite_runtime compat shim present")
+        return
+    util.logger.info(
+        "  ..   installing ai-edge-litert (tflite-runtime compat for Python 3.13)"
+    )
+    util.run([uv, "pip", "install", "ai-edge-litert"], check=False)
+    os.makedirs(shim_dir, exist_ok=True)
+    with open(os.path.join(shim_dir, "__init__.py"), "w") as f:
+        f.write("from ai_edge_litert import *\n")
+    with open(os.path.join(shim_dir, "interpreter.py"), "w") as f:
+        f.write("from ai_edge_litert.interpreter import *\n")
+    util.logger.info("  ok   tflite_runtime compat shim created")
+
+
 def _uv_sync() -> None:
     util.banner("Python dependencies (uv sync)")
     # --inexact so syncing never strips the provisioner-installed torch / STT deps.
-    util.run([util.uv(), "sync", "--inexact"])
+    cmd = [util.uv(), "sync", "--inexact"]
+    import platform, sys
+
+    if platform.machine() in ("aarch64", "arm64") and sys.version_info >= (3, 12):
+        _ensure_tflite_compat()
+        cmd += ["--no-install-package", "tflite-runtime"]
+    util.run(cmd)
 
 
 def cmd_detect(args) -> int:
@@ -60,13 +99,22 @@ def cmd_doctor(args) -> int:
     log("\n  models (provide these yourself):")
     for label, path in models.REQUIRED:
         present = models.resolve(path).exists()
-        log("    [%s] %-44s %s", "x" if present else " ", path, "" if present else "missing")
+        log(
+            "    [%s] %-44s %s",
+            "x" if present else " ",
+            path,
+            "" if present else "missing",
+        )
 
     log("\n  artifacts:")
     server = build_llama.server_binary_path(p)
     stt_entry = util.SIMUL_DIR / "simulstreaming_whisper_server.py"
     torch_ok = setup_torch._probe(p)
-    log("    [%s] %s", "x" if server.exists() else " ", server.name + " (llama_cpp_bin/)")
+    log(
+        "    [%s] %s",
+        "x" if server.exists() else " ",
+        server.name + " (llama_cpp_bin/)",
+    )
     log("    [%s] simulstreaming_lib (STT backend)", "x" if stt_entry.exists() else " ")
     log("    [%s] torch+torchaudio for accel=%s", "x" if torch_ok else " ", p.accel)
 
@@ -76,8 +124,12 @@ def cmd_doctor(args) -> int:
         or not torch_ok
         or bool(models.missing())
     )
-    log("\n  %s", "Gaps found - run `task setup` (and place any missing models), then `task run`."
-        if gaps else "All set. Run `task run`.")
+    log(
+        "\n  %s",
+        "Gaps found - run `task setup` (and place any missing models), then `task run`."
+        if gaps
+        else "All set. Run `task run`.",
+    )
     return 0
 
 
@@ -94,7 +146,9 @@ def cmd_setup(args) -> int:
     util.logger.info("\n%s\nSetup complete.", "=" * 70)
     gaps = models.missing()
     if gaps:
-        util.logger.info("Place these models where config.py expects them, then `task run`:")
+        util.logger.info(
+            "Place these models where config.py expects them, then `task run`:"
+        )
         for label, path in gaps:
             util.logger.info("  - %-18s %s", label, path)
     else:
@@ -137,7 +191,9 @@ def cmd_clean(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="installer", description="ai-voice-stack provisioner")
+    ap = argparse.ArgumentParser(
+        prog="installer", description="ai-voice-stack provisioner"
+    )
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--verbose", action="store_true", help="debug logging")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -145,17 +201,34 @@ def build_parser() -> argparse.ArgumentParser:
     def add(name, func, *, force=False, jobs=False, help=""):
         sp = sub.add_parser(name, parents=[common], help=help)
         if force:
-            sp.add_argument("--force", action="store_true", help="rebuild/redownload even if present")
+            sp.add_argument(
+                "--force",
+                action="store_true",
+                help="rebuild/redownload even if present",
+            )
         if jobs:
-            sp.add_argument("--jobs", type=int, default=None, help="parallel build jobs")
+            sp.add_argument(
+                "--jobs", type=int, default=None, help="parallel build jobs"
+            )
         sp.set_defaults(func=func, force=False, jobs=None)
         return sp
 
     add("doctor", cmd_doctor, help="report the machine profile + what's missing")
     add("detect", cmd_detect, help="print the detection profile as JSON")
-    add("setup", cmd_setup, force=True, jobs=True, help="install everything (idempotent)")
+    add(
+        "setup",
+        cmd_setup,
+        force=True,
+        jobs=True,
+        help="install everything (idempotent)",
+    )
     add("toolchain", cmd_toolchain, help="ensure cmake/ninja/compiler/CUDA")
-    add("torch", cmd_torch, force=True, help="install torch for the detected accelerator")
+    add(
+        "torch",
+        cmd_torch,
+        force=True,
+        help="install torch for the detected accelerator",
+    )
     add("stt", cmd_stt, force=True, help="clone SimulStreaming + install requirements")
     add("llama", cmd_llama, force=True, jobs=True, help="build llama.cpp llama-server")
     add("run", cmd_run, help="launch the stack (servers + pipeline)")

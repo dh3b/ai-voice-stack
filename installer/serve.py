@@ -1,7 +1,9 @@
 """`task run` supervisor: start the three backend servers (output to logs/<name>.log),
 wait until ready, then run pipeline.py on the console. Tears everything down on exit."""
+
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import time
@@ -61,11 +63,13 @@ def _spawn_server(label: str, module: str) -> _Proc:
     util.LOGS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = util.LOGS_DIR / f"{label}_server.log"
     log_file = open(log_path, "w")
+    env = {**os.environ, "TORCH_HUB_TRUST_REPO": "1"}
     popen = subprocess.Popen(
         [util.venv_python(), "-m", module],
         cwd=str(util.REPO_ROOT),
         stdout=log_file,
         stderr=subprocess.STDOUT,
+        env=env,
     )
     return _Proc(label, popen, log_path, log_file)
 
@@ -88,8 +92,11 @@ def _wait_ready(procs: list[_Proc], timeout: float) -> bool:
                 continue
             proc = by_label.get(label)
             if proc is not None and proc.popen.poll() is not None:
-                util.logger.error("  !!   %s server exited early (code %s). Last log lines:",
-                                  label, proc.popen.returncode)
+                util.logger.error(
+                    "  !!   %s server exited early (code %s). Last log lines:",
+                    label,
+                    proc.popen.returncode,
+                )
                 util.logger.error("%s", _tail(proc.log_path))
                 return False
             if check():
@@ -98,7 +105,9 @@ def _wait_ready(procs: list[_Proc], timeout: float) -> bool:
         if len(ready) == len(checks):
             return True
         time.sleep(1.0)
-    util.logger.error("  !!   timed out waiting for: %s", ", ".join(sorted(set(checks) - ready)))
+    util.logger.error(
+        "  !!   timed out waiting for: %s", ", ".join(sorted(set(checks) - ready))
+    )
     return False
 
 
@@ -107,7 +116,9 @@ def _terminate_tree(p: subprocess.Popen) -> None:
     # piper child (which keeps holding its port). taskkill /T takes the whole tree.
     # On POSIX the supervisors forward SIGTERM to their child themselves.
     if util.IS_WINDOWS:
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True
+        )
     else:
         p.terminate()
 
@@ -130,6 +141,7 @@ def run(ready_timeout: float = 300.0) -> int:
     util.banner("Launch ai-voice-stack")
 
     from . import models
+
     gaps = models.missing()
     if gaps:
         util.fail(
@@ -153,8 +165,12 @@ def run(ready_timeout: float = 300.0) -> int:
                 rerun="task run",
             )
 
-        util.logger.info("  ok   all backends ready - starting assistant (Ctrl-C to stop)\n")
-        pipeline = subprocess.Popen([util.venv_python(), "pipeline.py"], cwd=str(util.REPO_ROOT))
+        util.logger.info(
+            "  ok   all backends ready - starting assistant (Ctrl-C to stop)\n"
+        )
+        pipeline = subprocess.Popen(
+            [util.venv_python(), "pipeline.py"], cwd=str(util.REPO_ROOT)
+        )
         procs.append(_Proc("pipeline", pipeline))
         return pipeline.wait()
     except KeyboardInterrupt:

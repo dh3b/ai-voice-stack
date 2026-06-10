@@ -4,6 +4,7 @@ The Profile decides the torch wheel index (uv) and the llama.cpp cmake flags, so
 detection runs first and every other module just consumes its fields rather than
 re-branching on os/arch/accelerator.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,16 +34,16 @@ _TORCH_CUDA_TAGS: list[tuple[tuple[int, int], str]] = [
 
 @dataclass
 class Profile:
-    os: str                              # windows | linux | darwin
-    arch: str                            # x86_64 | arm64
-    accel: str                           # cpu | cuda | metal
+    os: str  # windows | linux | darwin
+    arch: str  # x86_64 | arm64
+    accel: str  # cpu | cuda | metal
     is_jetson: bool = False
-    cuda_version: str | None = None      # "12.6"
-    gpu_compute_cap: str | None = None   # "89"
+    cuda_version: str | None = None  # "12.6"
+    gpu_compute_cap: str | None = None  # "89"
     gpu_name: str | None = None
-    torch_index_url: str | None = None   # None => default PyPI wheels
-    llama_cuda_arch: str | None = None   # "89" | "87"
-    generator: str | None = None         # cmake -G value, or None for the default
+    torch_index_url: str | None = None  # None => default PyPI wheels
+    llama_cuda_arch: str | None = None  # "89" | "87"
+    generator: str | None = None  # cmake -G value, or None for the default
     has: dict = field(default_factory=dict)  # cmake, ninja, compiler, nvcc, git
 
     @property
@@ -69,13 +70,20 @@ class Profile:
         else:
             flags += ["-DGGML_NATIVE=OFF", "-DBUILD_SHARED_LIBS=OFF"]
 
+        # Disable CPU features the host doesn't support (e.g. AVX masked by a
+        # hypervisor).  Without this, the ggml cmake defaults to enabling all
+        # x86-64 instruction sets, which causes SIGILL at runtime.
+        flags += _llama_cpu_disable_flags()
+
         # libcurl off on Windows to avoid the extra dependency.
         flags.append("-DLLAMA_CURL=OFF" if self.os == "windows" else "-DLLAMA_CURL=ON")
         return flags
 
     def summary(self) -> str:
         bits = [
-            f"os={self.os}", f"arch={self.arch}", f"accel={self.accel}",
+            f"os={self.os}",
+            f"arch={self.arch}",
+            f"accel={self.accel}",
         ]
         if self.is_jetson:
             bits.append("jetson=yes")
@@ -129,7 +137,9 @@ def _nvidia_compute_cap() -> tuple[str | None, str | None]:
         return None, None
     first = out.splitlines()[0]
     parts = [p.strip() for p in first.split(",")]
-    cap = parts[0].replace(".", "") if parts and re.match(r"\d+\.\d+", parts[0]) else None
+    cap = (
+        parts[0].replace(".", "") if parts and re.match(r"\d+\.\d+", parts[0]) else None
+    )
     name = parts[1] if len(parts) > 1 else None
     return cap, name
 
@@ -156,11 +166,21 @@ def _vswhere(prop: str) -> str | None:
     vswhere = Path(pf) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
     if not vswhere.exists():
         return None
-    return util.try_output([
-        str(vswhere), "-latest", "-products", "*",
-        "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-        "-property", prop,
-    ]) or None
+    return (
+        util.try_output(
+            [
+                str(vswhere),
+                "-latest",
+                "-products",
+                "*",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                prop,
+            ]
+        )
+        or None
+    )
 
 
 def _vswhere_has_vctools() -> bool:
@@ -183,7 +203,9 @@ def _torch_index(p: Profile) -> str | None:
     if p.accel == "cuda":
         if p.is_jetson:
             return JETSON_TORCH_INDEX
-        return f"https://download.pytorch.org/whl/{_cuda_tag(p.cuda_version) or 'cu124'}"
+        return (
+            f"https://download.pytorch.org/whl/{_cuda_tag(p.cuda_version) or 'cu124'}"
+        )
     if p.os == "darwin":
         return None  # default wheels (CPU/MPS)
     if p.arch == "arm64":
@@ -202,6 +224,98 @@ def _cuda_tag(version: str | None) -> str | None:
         if detected >= ver:
             return tag
     return None
+
+
+_CPU_FLAGS_CACHE: frozenset | None = None
+
+
+def _cpu_flags() -> frozenset:
+    """Return the set of CPU flags advertised by /proc/cpuinfo (Linux) or via inspection on Windows."""
+    global _CPU_FLAGS_CACHE
+    if _CPU_FLAGS_CACHE is not None:
+        return _CPU_FLAGS_CACHE
+    flags: set[str] = set()
+
+    try:
+        for line in Path("/proc/cpuinfo").read_text(errors="replace").splitlines():
+            if line.startswith("flags"):
+                flags.update(line.split(":", 1)[1].strip().lower().split())
+    except OSError:
+        pass
+
+    if not flags and platform.system().lower() == "windows":
+        try:
+            bios = (
+                util.try_output(
+                    [
+                        "wmic",
+                        "bios",
+                        "get",
+                        "SerialNumber,Manufacturer",
+                        "/format:value",
+                    ],
+                    timeout=10.0,
+                )
+                or ""
+            ).lower()
+            if "virtualbox" in bios:
+                # VirtualBox may mask some CPU features even when the host CPU
+                # supports them. Be conservative: only report basic features.
+                # Omit AVX entirely — on VirtualBox even /arch:AVX can cause
+                # STATUS_ILLEGAL_INSTRUCTION at startup (MSVC CRT dispatch).
+                flags = {"sse", "sse2"}
+            else:
+                # Non-VirtualBox: assume the host has all modern x64 features since
+                # we cannot easily probe cpuid from Python on Windows.
+                flags = {"sse", "sse2", "sse4_2", "avx", "avx2", "fma", "f16c", "bmi2"}
+        except Exception:
+            pass
+
+    _CPU_FLAGS_CACHE = frozenset(flags)
+    return _CPU_FLAGS_CACHE
+
+
+def _llama_cpu_disable_flags() -> list[str]:
+    """Return cmake -D flags to disable CPU features the host lacks."""
+    have = _cpu_flags()
+    if not have:
+        return []
+
+    # mapping: cmake GGML_FOO variable  ->  /proc/cpuinfo flag
+    checks: list[tuple[str, str]] = [
+        ("GGML_SSE42", "sse4_2"),
+        ("GGML_AVX", "avx"),
+        ("GGML_AVX2", "avx2"),
+        ("GGML_FMA", "fma"),
+        ("GGML_F16C", "f16c"),
+        ("GGML_BMI2", "bmi2"),
+        ("GGML_AVX512", "avx512f"),
+        ("GGML_AVX512_VBMI", "avx512_vbmi"),
+        ("GGML_AVX512_VNNI", "avx512_vnni"),
+        ("GGML_AVX512_BF16", "avx512_bf16"),
+    ]
+    flags = [f"-D{var}=OFF" for var, flag in checks if flag not in have]
+
+    # On VirtualBox (or any Windows host detected as such), also disable
+    # OpenMP since the MSVC OpenMP runtime dispatch can trigger SIGILL in
+    # hypervisors that don't fully virtualise certain instructions.
+    try:
+        import platform as _pl
+
+        if _pl.system().lower() == "windows":
+            bios = (
+                util.try_output(
+                    ["wmic", "bios", "get", "SerialNumber", "/format:value"],
+                    timeout=5.0,
+                )
+                or ""
+            )
+            if "virtualbox" in bios.lower():
+                flags.append("-DGGML_OPENMP=OFF")
+    except Exception:
+        pass
+
+    return flags
 
 
 def _derive(p: Profile) -> None:

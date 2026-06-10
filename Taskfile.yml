@@ -1,6 +1,8 @@
 # Command palette. Each task is a thin call into uv or the installer package; all
 # platform/accelerator divergence lives in installer/, not here.
 # Prerequisites: uv and task (see README). Pass flags after `--`, e.g. `task setup -- --force`.
+env:
+  UV_NO_SYNC: "1"
 version: "3"
 silent: true
 

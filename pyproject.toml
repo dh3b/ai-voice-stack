@@ -14,7 +14,7 @@ dependencies = [
     "openwakeword==0.6.0",
     "piper-tts[http]==1.4.2",
     "tzdata==2026.2",
-    "numpy",  # version is left to the resolver on CPU; the provisioner pins numpy<2 for CUDA/Jetson
+    "numpy<2",  # <2 is mandatory for Jetson/JetPack; universal safe pin
     "onnxruntime<1.24; python_version < '3.11'",
 ]
 

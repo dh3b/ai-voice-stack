@@ -1,5 +1,6 @@
 """Clone the SimulStreaming (Whisper) backend into simulstreaming_lib/ and install
 its requirements. Run after torch so its unpinned torch req isn't reinstalled."""
+
 from __future__ import annotations
 
 import shutil
@@ -37,12 +38,31 @@ def _clone() -> None:
             shutil.copy2(item, dest)
 
 
+def _predownload_silero_vad() -> None:
+    """Pre-download the silero VAD model into torch hub cache so the STT server
+    doesn't hit an interactive trust prompt at startup."""
+    import torch
+    import os
+
+    cache = os.path.expanduser("~/.cache/torch/hub/snakers4_silero-vad_master")
+    if os.path.isdir(cache):
+        util.logger.info("  ok   silero-vad model cached")
+        return
+    util.logger.info("  ..   downloading silero-vad VAD model")
+    torch.hub.load(
+        repo_or_dir="snakers4/silero-vad", model="silero_vad", trust_repo=True
+    )
+    util.logger.info("  ok   silero-vad model cached")
+
+
 def install(profile: Profile, force: bool = False) -> None:
     util.banner("SimulStreaming (STT backend)")
     entry = util.SIMUL_DIR / _ENTRY
 
     if entry.exists() and not force:
-        util.logger.info("  ok   simulstreaming_lib present (skip clone; --force to refresh)")
+        util.logger.info(
+            "  ok   simulstreaming_lib present (skip clone; --force to refresh)"
+        )
     else:
         util.logger.info("  get  %s @ %s", SIMUL_REPO, SIMUL_REF[:12])
         _clone()
@@ -54,10 +74,14 @@ def install(profile: Profile, force: bool = False) -> None:
 
     reqs = util.SIMUL_DIR / "requirements_whisper.txt"
     if not reqs.exists():
-        util.fail("requirements_whisper.txt missing in simulstreaming_lib", f"looked for {reqs}")
+        util.fail(
+            "requirements_whisper.txt missing in simulstreaming_lib",
+            f"looked for {reqs}",
+        )
     util.logger.info("  pip  installing SimulStreaming requirements (after torch)")
     reqs_cmd = [util.uv(), "pip", "install", "-r", str(reqs)]
     if profile.numpy_pin:
         reqs_cmd.append(profile.numpy_pin)  # keep numpy<2 through this resolve too
     util.run(reqs_cmd)
+    _predownload_silero_vad()
     util.logger.info("  ok   SimulStreaming ready")
