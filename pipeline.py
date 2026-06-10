@@ -120,7 +120,11 @@ async def main():
 
         # Optional transcript processing might go here
 
-        interrupted = await run_turn_with_bargein(transcript)
+        if app_config.barge_in_enabled:
+            interrupted = await run_turn_with_bargein(transcript)
+        else:
+            await run_turn(transcript)
+            interrupted = False
         tracer.report()
 
         if interrupted:
