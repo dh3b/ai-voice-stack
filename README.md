@@ -14,10 +14,10 @@ A turn runs left to right: the wake word listener (openwakeword) triggers on loa
 
 ## Compatibility
 
-- Windows, Linux and macOS, on x86_64 and arm64. Targets edge devices such as NVIDIA Jetson; also runs on RPi 4/5 (CPU only, slow).
+- Windows and Linux, on x86_64 and arm64. Targets edge devices such as NVIDIA Jetson; also runs on RPi 4/5 (CPU only, slow).
 - Python 3.10+ (provided/managed by `uv` - you don't need it preinstalled).
 - A microphone and a speaker.
-- A CUDA-capable GPU (or Apple Metal) is recommended; CPU works but the LLM and Whisper will be slow.
+- A CUDA-capable GPU is recommended; CPU works but the LLM and Whisper will be slow.
 
 There is **no manual build step**. The installer detects your machine and builds
 `llama-server`, fetches the models, installs the right `torch`, and clones the STT
@@ -33,7 +33,6 @@ Two prerequisites - **`uv`** (Python/venv/deps) and **`task`** ([go-task](https:
 | | uv | task |
 |---|---|---|
 | **Windows** | `powershell -c "irm https://astral.sh/uv/install.ps1 \| iex"` | `winget install Task.Task` |
-| **macOS** | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `brew install go-task` |
 | **Linux** | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `sudo apt install task` |
 
 Then:
@@ -84,7 +83,7 @@ task llama           # build llama.cpp's llama-server
 task llama -- --force --jobs 4   # flags pass through after `--`
 ```
 
-- **GPU offload:** after a CUDA or Metal `llama` build, set `gpu_layers=99` (and
+- **GPU offload:** after a CUDA `llama` build, set `gpu_layers=99` (and
   `flash_attn=True`) in `LLMServerConfig` in `config.py` to run the LLM on the GPU.
 - **Pinned versions:** the llama.cpp ref is `LLAMA_REF` in `installer/build_llama.py`;
   the SimulStreaming ref is `SIMUL_REF` in `installer/setup_stt.py`.

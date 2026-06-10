@@ -34,7 +34,7 @@ _TORCH_CUDA_TAGS: list[tuple[tuple[int, int], str]] = [
 
 @dataclass
 class Profile:
-    os: str  # windows | linux | darwin
+    os: str  # windows | linux
     arch: str  # x86_64 | arm64
     accel: str  # cpu | cuda | metal
     is_jetson: bool = False
@@ -65,8 +65,6 @@ class Profile:
                 "-DGGML_CUDA_F16=ON",
                 f"-DCMAKE_CUDA_ARCHITECTURES={self.llama_cuda_arch or '89'}",
             ]
-        elif self.accel == "metal":
-            flags += ["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON"]
         else:
             flags += ["-DGGML_NATIVE=OFF", "-DBUILD_SHARED_LIBS=OFF"]
 
@@ -101,9 +99,7 @@ class Profile:
 # Raw probes
 # ---------------------------------------------------------------------------
 def _detect_os() -> str:
-    return {"darwin": "darwin", "windows": "windows"}.get(
-        platform.system().lower(), "linux"
-    )
+    return "windows" if platform.system().lower() == "windows" else "linux"
 
 
 def _normalize_arch(machine: str) -> str:
@@ -191,8 +187,6 @@ def _vswhere_has_vctools() -> bool:
 def _has_compiler(osname: str) -> bool:
     if osname == "windows":
         return bool(shutil.which("cl")) or _vswhere_has_vctools()
-    if osname == "darwin":
-        return bool(shutil.which("clang") or shutil.which("gcc"))
     return bool(shutil.which("gcc") or shutil.which("g++") or shutil.which("clang"))
 
 
@@ -206,8 +200,6 @@ def _torch_index(p: Profile) -> str | None:
         return (
             f"https://download.pytorch.org/whl/{_cuda_tag(p.cuda_version) or 'cu124'}"
         )
-    if p.os == "darwin":
-        return None  # default wheels (CPU/MPS)
     if p.arch == "arm64":
         return None  # Raspberry Pi etc. → default PyPI CPU wheels
     return "https://download.pytorch.org/whl/cpu"  # linux/windows x86 CPU
@@ -227,6 +219,26 @@ def _cuda_tag(version: str | None) -> str | None:
 
 
 _CPU_FLAGS_CACHE: frozenset | None = None
+_VBOX_CACHE: bool | None = None
+
+
+def _is_virtualbox() -> bool:
+    """Whether the host is a VirtualBox VM (Windows-only; Linux has DMI)."""
+    global _VBOX_CACHE
+    if _VBOX_CACHE is not None:
+        return _VBOX_CACHE
+    try:
+        bios = (
+            util.try_output(
+                ["wmic", "bios", "get", "SerialNumber,Manufacturer", "/format:value"],
+                timeout=10.0,
+            )
+            or ""
+        ).lower()
+        _VBOX_CACHE = "virtualbox" in bios
+    except Exception:
+        _VBOX_CACHE = False
+    return _VBOX_CACHE
 
 
 def _cpu_flags() -> frozenset:
@@ -244,32 +256,12 @@ def _cpu_flags() -> frozenset:
         pass
 
     if not flags and platform.system().lower() == "windows":
-        try:
-            bios = (
-                util.try_output(
-                    [
-                        "wmic",
-                        "bios",
-                        "get",
-                        "SerialNumber,Manufacturer",
-                        "/format:value",
-                    ],
-                    timeout=10.0,
-                )
-                or ""
-            ).lower()
-            if "virtualbox" in bios:
-                # VirtualBox may mask some CPU features even when the host CPU
-                # supports them. Be conservative: only report basic features.
-                # Omit AVX entirely — on VirtualBox even /arch:AVX can cause
-                # STATUS_ILLEGAL_INSTRUCTION at startup (MSVC CRT dispatch).
-                flags = {"sse", "sse2"}
-            else:
-                # Non-VirtualBox: assume the host has all modern x64 features since
-                # we cannot easily probe cpuid from Python on Windows.
-                flags = {"sse", "sse2", "sse4_2", "avx", "avx2", "fma", "f16c", "bmi2"}
-        except Exception:
-            pass
+        if _is_virtualbox():
+            # VirtualBox may mask some CPU features. Be conservative.
+            flags = {"sse", "sse2"}
+        else:
+            # Assume all modern x64 features (no cpuid from Python on Windows).
+            flags = {"sse", "sse2", "sse4_2", "avx", "avx2", "fma", "f16c", "bmi2"}
 
     _CPU_FLAGS_CACHE = frozenset(flags)
     return _CPU_FLAGS_CACHE
@@ -296,24 +288,9 @@ def _llama_cpu_disable_flags() -> list[str]:
     ]
     flags = [f"-D{var}=OFF" for var, flag in checks if flag not in have]
 
-    # On VirtualBox (or any Windows host detected as such), also disable
-    # OpenMP since the MSVC OpenMP runtime dispatch can trigger SIGILL in
-    # hypervisors that don't fully virtualise certain instructions.
-    try:
-        import platform as _pl
-
-        if _pl.system().lower() == "windows":
-            bios = (
-                util.try_output(
-                    ["wmic", "bios", "get", "SerialNumber", "/format:value"],
-                    timeout=5.0,
-                )
-                or ""
-            )
-            if "virtualbox" in bios.lower():
-                flags.append("-DGGML_OPENMP=OFF")
-    except Exception:
-        pass
+    # On VirtualBox disable OpenMP — the MSVC runtime dispatch can also SIGILL.
+    if _is_virtualbox():
+        flags.append("-DGGML_OPENMP=OFF")
 
     return flags
 
@@ -340,8 +317,6 @@ def detect() -> Profile:
 
     if is_jetson or has_nvidia:
         accel = "cuda"
-    elif osname == "darwin":
-        accel = "metal"
     else:
         accel = "cpu"
 

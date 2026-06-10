@@ -16,15 +16,7 @@ _ENTRY = "simulstreaming_whisper_server.py"
 
 def _clone() -> None:
     tmp = util.BUILD_DIR / "SimulStreaming-lite"
-    if tmp.exists():
-        shutil.rmtree(tmp, ignore_errors=True)
-    util.BUILD_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Shallow-fetch the exact pinned commit (works for both tags and SHAs).
-    util.run(["git", "init", "-q", str(tmp)])
-    util.run(["git", "-C", str(tmp), "remote", "add", "origin", SIMUL_REPO])
-    util.run(["git", "-C", str(tmp), "fetch", "--depth", "1", "origin", SIMUL_REF])
-    util.run(["git", "-C", str(tmp), "checkout", "-q", "FETCH_HEAD"])
+    util.shallow_clone(tmp, SIMUL_REPO, SIMUL_REF)
 
     # Copy the tree into simulstreaming_lib/ (keeping the tracked .gitkeep there).
     util.SIMUL_DIR.mkdir(parents=True, exist_ok=True)

@@ -3,6 +3,7 @@
 Everything here is stdlib-only so the installer can run before any dependency is
 installed (it bootstraps the venv itself).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -24,7 +25,7 @@ ASSETS_DIR = REPO_ROOT / "assets"
 LLAMA_BIN_DIR = REPO_ROOT / "llama_cpp_bin"
 SIMUL_DIR = REPO_ROOT / "simulstreaming_lib"
 BUILD_DIR = REPO_ROOT / ".build"
-LOGS_DIR = REPO_ROOT / "logs"           # per-server logs for `task run`
+LOGS_DIR = REPO_ROOT / "logs"  # per-server logs for `task run`
 VENV_DIR = REPO_ROOT / ".venv"
 
 logger = logging.getLogger("installer")
@@ -39,7 +40,9 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
-def fail(title: str, body: str = "", *, rerun: str = "task setup", code: int = 1) -> NoReturn:
+def fail(
+    title: str, body: str = "", *, rerun: str = "task setup", code: int = 1
+) -> NoReturn:
     bar = "=" * 70
     lines = [f"\n{bar}", f"  SETUP STOPPED: {title}", "-" * 70]
     if body:
@@ -89,7 +92,9 @@ def run(
         raise
 
 
-def try_output(cmd: Sequence[str | os.PathLike], *, timeout: float = 15.0) -> str | None:
+def try_output(
+    cmd: Sequence[str | os.PathLike], *, timeout: float = 15.0
+) -> str | None:
     """Run a probe command, returning stripped stdout or None on any failure."""
     try:
         res = subprocess.run(
@@ -107,6 +112,17 @@ def try_output(cmd: Sequence[str | os.PathLike], *, timeout: float = 15.0) -> st
 
 def which(name: str) -> str | None:
     return shutil.which(name)
+
+
+def shallow_clone(dst: Path, repo: str, ref: str) -> None:
+    """Shallow-fetch an exact pinned ref (tag or SHA) into *dst*."""
+    if dst.exists():
+        shutil.rmtree(dst, ignore_errors=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    run(["git", "init", "-q", str(dst)])
+    run(["git", "-C", str(dst), "remote", "add", "origin", repo])
+    run(["git", "-C", str(dst), "fetch", "--depth", "1", "origin", ref])
+    run(["git", "-C", str(dst), "checkout", "-q", "FETCH_HEAD"])
 
 
 def venv_bin(name: str) -> Path | None:
@@ -130,8 +146,8 @@ def uv() -> str:
         fail(
             "uv is not installed",
             "uv manages the Python venv and dependencies. Install it:\n"
-            "  Windows : powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\"\n"
-            "  Linux/mac: curl -LsSf https://astral.sh/uv/install.sh | sh\n"
+            '  Windows : powershell -c "irm https://astral.sh/uv/install.ps1 | iex"\n'
+            "  Linux: curl -LsSf https://astral.sh/uv/install.sh | sh\n"
             "  (or)    : pip install uv",
         )
     return exe
@@ -181,13 +197,17 @@ def download(
         # Never destroy it; `--force` (which deletes first) is how you re-fetch the default.
         logger.warning(
             "  ok   %s present but not the default checksum - keeping it "
-            "(assuming a user-provided model; use --force to replace)", name)
+            "(assuming a user-provided model; use --force to replace)",
+            name,
+        )
         return dest
 
     part = dest.with_name(dest.name + ".part")
     have = part.stat().st_size if part.exists() else 0
 
-    req = urllib.request.Request(url, headers={"User-Agent": "ai-voice-stack-installer"})
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "ai-voice-stack-installer"}
+    )
     if have:
         req.add_header("Range", f"bytes={have}-")
 
@@ -206,7 +226,9 @@ def download(
         if mode == "wb":
             have = 0  # server ignored Range; restart
         total = have + int(resp.headers.get("Content-Length", 0) or 0)
-        logger.info("  get  %s  (%s)", name, _fmt_bytes(total) if total else "size unknown")
+        logger.info(
+            "  get  %s  (%s)", name, _fmt_bytes(total) if total else "size unknown"
+        )
         done = have
         next_tick = done + (32 << 20)
         with open(part, mode) as fh:

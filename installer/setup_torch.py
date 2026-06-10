@@ -4,6 +4,7 @@ torch is kept out of pyproject because the right wheel depends on the runtime
 hardware (CPU index vs cuXXX vs the Jetson index). Runs before the SimulStreaming
 requirements so they don't pull a wrong-index torch.
 """
+
 from __future__ import annotations
 
 from . import util
@@ -17,11 +18,11 @@ def _import_torch(profile: Profile) -> tuple[bool, str]:
     """(ok, error text). ok = torch+torchaudio import and satisfy the accelerator."""
     if profile.accel == "cuda":
         code = "import torch, torchaudio; assert torch.version.cuda is not None"
-    elif profile.accel == "metal":
-        code = "import torch, torchaudio; assert torch.backends.mps.is_built()"
     else:
         code = "import torch, torchaudio"
-    res = util.run([util.venv_python(), "-c", code], check=False, capture=True, quiet=True)
+    res = util.run(
+        [util.venv_python(), "-c", code], check=False, capture=True, quiet=True
+    )
     return res.returncode == 0, (res.stderr or res.stdout or "").strip()
 
 
@@ -32,7 +33,9 @@ def _probe(profile: Profile) -> bool:
 def install(profile: Profile, force: bool = False) -> None:
     util.banner(f"PyTorch  (accel={profile.accel})")
     if not force and _probe(profile):
-        util.logger.info("  ok   torch + torchaudio already present for accel=%s", profile.accel)
+        util.logger.info(
+            "  ok   torch + torchaudio already present for accel=%s", profile.accel
+        )
         return
 
     uv = util.uv()

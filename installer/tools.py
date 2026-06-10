@@ -4,6 +4,7 @@ Per tool, tries the cleanest mechanism first: pip into the venv (cmake, ninja, a
 experimental CUDA wheels), then the system package manager (C++ compiler, system
 CUDA), then stops with an exact instruction.
 """
+
 from __future__ import annotations
 
 import os
@@ -26,9 +27,9 @@ class BuildTools:
 _WIN_MSVC_MSG = (
     "llama.cpp needs the MSVC C++ build tools. Install them, then re-run:\n\n"
     "  winget install --id Microsoft.VisualStudio.2022.BuildTools -e \\\n"
-    "    --override \"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended\"\n\n"
-    "or download \"Build Tools for Visual Studio 2022\" and check the\n"
-    "\"Desktop development with C++\" workload:\n"
+    '    --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"\n\n'
+    'or download "Build Tools for Visual Studio 2022" and check the\n'
+    '"Desktop development with C++" workload:\n'
     "  https://visualstudio.microsoft.com/visual-cpp-build-tools/"
 )
 _LINUX_CC_MSG = (
@@ -36,11 +37,6 @@ _LINUX_CC_MSG = (
     "  Debian/Ubuntu : sudo apt-get install -y build-essential\n"
     "  Fedora/RHEL   : sudo dnf groupinstall -y 'Development Tools'\n"
     "  Arch          : sudo pacman -S --needed base-devel"
-)
-_MAC_CC_MSG = (
-    "No C++ compiler found. Install the Apple command-line tools, then re-run:\n\n"
-    "  xcode-select --install\n\n"
-    "(The installer opens a GUI dialog; finish it, then re-run setup.)"
 )
 
 
@@ -71,7 +67,10 @@ def ensure_cmake_ninja(profile: Profile) -> tuple[str, str | None]:
         ninja = ninja or _venv_tool("ninja")
 
     if not cmake:
-        util.fail("cmake unavailable after install attempt", "Try manually: uv pip install cmake")
+        util.fail(
+            "cmake unavailable after install attempt",
+            "Try manually: uv pip install cmake",
+        )
     util.logger.info("  ok   cmake: %s", cmake)
     if ninja:
         util.logger.info("  ok   ninja: %s", ninja)
@@ -85,7 +84,9 @@ def windows_msvc_env() -> dict[str, str]:
         util.fail("no C++ compiler (MSVC) found", _WIN_MSVC_MSG)
     vcvars = Path(install) / "VC" / "Auxiliary" / "Build" / "vcvars64.bat"
     if not vcvars.exists():
-        util.fail("MSVC vcvars64.bat not found", f"expected at {vcvars}\n\n{_WIN_MSVC_MSG}")
+        util.fail(
+            "MSVC vcvars64.bat not found", f"expected at {vcvars}\n\n{_WIN_MSVC_MSG}"
+        )
 
     # Capture vcvars' env via a temp .bat (inline `cmd /c call "spaced path"` mangles quoting).
     util.BUILD_DIR.mkdir(parents=True, exist_ok=True)
@@ -96,7 +97,9 @@ def windows_msvc_env() -> dict[str, str]:
     finally:
         probe.unlink(missing_ok=True)
     if res.returncode != 0:
-        util.fail("could not initialize the MSVC environment", res.stderr or res.stdout or "")
+        util.fail(
+            "could not initialize the MSVC environment", res.stderr or res.stdout or ""
+        )
 
     env: dict[str, str] = {}
     for line in res.stdout.splitlines():
@@ -119,11 +122,18 @@ def ensure_compiler(profile: Profile) -> None:
 
     if profile.os == "windows":
         if util.which("winget"):
-            util.logger.info("  ..   attempting winget install of VS 2022 Build Tools (C++)")
+            util.logger.info(
+                "  ..   attempting winget install of VS 2022 Build Tools (C++)"
+            )
             util.run(
                 [
-                    "winget", "install", "--id", "Microsoft.VisualStudio.2022.BuildTools",
-                    "-e", "--accept-package-agreements", "--accept-source-agreements",
+                    "winget",
+                    "install",
+                    "--id",
+                    "Microsoft.VisualStudio.2022.BuildTools",
+                    "-e",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
                     "--override",
                     "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended",
                 ],
@@ -139,9 +149,6 @@ def ensure_compiler(profile: Profile) -> None:
             util.logger.info("  ok   build-essential installed")
             return
         util.fail("no C++ compiler found", _LINUX_CC_MSG)
-
-    # darwin: xcode-select --install is interactive, so we instruct rather than block.
-    util.fail("no C++ compiler found", _MAC_CC_MSG)
 
 
 # CUDA build components
@@ -216,7 +223,12 @@ def _try_pip_cuda(profile: Profile, bt: BuildTools) -> BuildTools | None:
     nvidia_root = _venv_nvidia_root()
     if not nvidia_root:
         return None
-    nvcc = nvidia_root / "cuda_nvcc" / "bin" / ("nvcc.exe" if profile.os == "windows" else "nvcc")
+    nvcc = (
+        nvidia_root
+        / "cuda_nvcc"
+        / "bin"
+        / ("nvcc.exe" if profile.os == "windows" else "nvcc")
+    )
     if not nvcc.exists():
         return None
 
@@ -231,7 +243,9 @@ def _try_pip_cuda(profile: Profile, bt: BuildTools) -> BuildTools | None:
         f"-DCUDAToolkit_ROOT={nvidia_root / 'cuda_nvcc'}",
     ]
     if include_dirs:
-        bt.extra_cmake.append("-DCMAKE_CUDA_FLAGS=" + " ".join(f'-I"{d}"' for d in include_dirs))
+        bt.extra_cmake.append(
+            "-DCMAKE_CUDA_FLAGS=" + " ".join(f'-I"{d}"' for d in include_dirs)
+        )
     # Make the wheel libs discoverable at link + runtime.
     path_sep = ";" if profile.os == "windows" else ":"
     if lib_dirs:
@@ -251,7 +265,11 @@ def _try_pip_cuda(profile: Profile, bt: BuildTools) -> BuildTools | None:
 
 def _venv_nvidia_root() -> Path | None:
     res = util.run(
-        [util.venv_python(), "-c", "import nvidia, os; print(os.path.dirname(nvidia.__file__))"],
+        [
+            util.venv_python(),
+            "-c",
+            "import nvidia, os; print(os.path.dirname(nvidia.__file__))",
+        ],
         check=False,
         capture=True,
         quiet=True,

@@ -51,11 +51,10 @@ def build(profile: Profile, *, jobs: int | None = None, force: bool = False) -> 
     _compile(profile, bt, builddir, jobs)
     _install_artifacts(profile, builddir, out)
 
-    if profile.accel in ("cuda", "metal"):
+    if profile.accel == "cuda":
         util.logger.info(
-            "  note GPU build: to actually use the %s, set gpu_layers=99 (and "
-            "flash_attn=True) in LLMServerConfig in config.py.",
-            "GPU" if profile.accel == "cuda" else "Metal GPU",
+            "  note GPU build: set gpu_layers=99 (and flash_attn=True) in "
+            "LLMServerConfig in config.py to use the GPU."
         )
     return out
 
@@ -65,14 +64,8 @@ def _clone(profile: Profile) -> Path:
     if (src / "CMakeLists.txt").exists():
         util.logger.info("  ok   llama.cpp source present (%s)", src)
         return src
-    util.BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    if src.exists():
-        shutil.rmtree(src, ignore_errors=True)
     util.logger.info("  get  %s @ %s", LLAMA_REPO, LLAMA_REF)
-    util.run(["git", "init", "-q", str(src)])
-    util.run(["git", "-C", str(src), "remote", "add", "origin", LLAMA_REPO])
-    util.run(["git", "-C", str(src), "fetch", "--depth", "1", "origin", LLAMA_REF])
-    util.run(["git", "-C", str(src), "checkout", "-q", "FETCH_HEAD"])
+    util.shallow_clone(src, LLAMA_REPO, LLAMA_REF)
     return src
 
 
@@ -148,7 +141,7 @@ def _install_artifacts(profile: Profile, builddir: Path, out: Path) -> None:
     util.LLAMA_BIN_DIR.mkdir(parents=True, exist_ok=True)
 
     # CUDA/shared builds emit ggml backends as sibling shared libs; copy them too.
-    libext = {"windows": ".dll", "darwin": ".dylib"}.get(profile.os, ".so")
+    libext = ".dll" if profile.os == "windows" else ".so"
     copied = 0
     for item in server.parent.iterdir():
         if item == server:
