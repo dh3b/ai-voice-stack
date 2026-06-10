@@ -14,7 +14,7 @@ dependencies = [
     "openwakeword==0.6.0",
     "piper-tts[http]==1.4.2",
     "tzdata==2026.2",
-    "numpy<2",  # <2 is mandatory for Jetson/JetPack; universal safe pin
+    "numpy<2; python_version < '3.14'",  # <2 mandatory for Jetson; >=3.14 needs numpy 2.x wheels
     "onnxruntime<1.24; python_version < '3.11'",
 ]
 
