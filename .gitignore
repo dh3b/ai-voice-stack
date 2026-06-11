@@ -1,6 +1,7 @@
 .venv
 .vscode
 .ruff_cache
+.env
 
 /temp
 /logs

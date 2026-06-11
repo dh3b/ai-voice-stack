@@ -31,12 +31,13 @@ backend for you - see below.
 
 ## <a name="installation"></a>Installation
 
-Two prerequisites - **`uv`** (Python/venv/deps) and **`task`** ([go-task](https://taskfile.dev), the command runner):
+Two prerequisites - **`uv`** (Python/venv/deps) and **`task`** ([go-task](https://taskfile.dev), the command runner).
+If you want to use the example models, **you need to have git-lfs installed**, then clone the repository. If the models still don't work after cloning or you just installed git-lfs, make sure to run `git lfs pull` inside the repo.
 
 | | uv | task |
 |---|---|---|
 | **Windows** | `powershell -c "irm https://astral.sh/uv/install.ps1 \| iex"` | `winget install Task.Task` |
-| **Linux** | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `sudo apt install task` |
+| **Linux** | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `mkdir -p ~/.local/bin`<br>`sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin`<br>`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc` |
 
 Then:
 
@@ -46,8 +47,6 @@ cd ai-voice-stack
 task setup     # detects the machine, installs deps + torch, builds llama.cpp, fetches models
 task run       # launches wakeword + STT + LLM + TTS
 ```
-
-If you want to use the example models, **you need to have git lfs installed**. If the models still don't work after cloning, make sure to run `git lfs pull` inside the repo.
 
 `task setup` can fail when a step genuinely can't
 self-install (typically a system C++ compiler, or a full CUDA toolkit on Windows),
@@ -84,6 +83,9 @@ task torch           # torch+torchaudio for the detected accelerator
 task stt             # clone SimulStreaming + install its requirements
 task llama           # build llama.cpp's llama-server
 task llama -- --force --jobs 4   # flags pass through after `--`
+task test            # run unit tests
+task smoke           # run smoke tests
+task clean           # clean build scratch (recommended to offload space after build)
 ```
 
 - **GPU offload:** after a CUDA `llama` build, set `gpu_layers=99` (and
@@ -105,38 +107,8 @@ task llama -- --force --jobs 4   # flags pass through after `--`
 
 ## Configuration
 
-Everything lives in `config.py` as per-component dataclasses; edit the defaults there. The settings you are most likely to change:
-
-```python
-AppConfig.enable_earcons         # audio ack/nack sound cues
-AppConfig.continuation_enabled   # keep listening for a follow-up after each reply
-AppConfig.warmup_on_init         # warm the models on startup
-
-LLMClientConfig.mode             # "agent" (tool-calling) or "chatbot"
-LLMClientConfig.system_instructions
-LLMClientConfig.temperature
-LLMClientConfig.max_iterations   # max tool-call rounds per turn
-LLMClientConfig.response_timeout # max seconds to wait for a response before aborting the turn
-LLMClientConfig.history_enabled  # Whether to enable chat history (current session only)
-LLMClientConfig.history_max_turns # How much messages (ai-user pairs) aback should the history store
-LLMClientConfig.history_idle_timeout_s # After how much seconds should the earliest message be wiped from memory
-
-ToolsConfig.enabled_tool_modules # which tool modules to load
-ToolsConfig.tool_timeout         # max seconds per tool call before the model gets a timeout error
-ToolsConfig.memory_db_path       # SQLite file backing persistent memory
-
-OWWClientConfig.model_paths      # wake word .onnx model(s)
-OWWClientConfig.threshold        # detection sensitivity, 0-1
-
-STTServerConfig.model_path       # Whisper checkpoint
-STTServerConfig.language         # "auto" or an ISO code
-STTServerConfig.response_timeout # default window, seconds
-STTClientConfig.continuation_timeout   # follow-up window, seconds
-
-TTSClientConfig.length_scale     # speech rate (higher is slower)
-```
-
-Model paths and server addresses (LLM `:43001`, STT `:43002`, TTS `:43003`) are defined here too.
+You can modify every setting by copying the `.env.example` into a `.env` file.
+Find out what each setting does in the [config help](CONFIG_HELP.md) reference.
 
 ## Adding a tool
 
@@ -172,9 +144,10 @@ Then add the module name to `ToolsConfig.enabled_tool_modules` (here, `"weather_
 > [!NOTE]
 > Feel free to fork the repository and add some tools yourself. I'd be glad to see them.
 
-## License
-MIT
-
 ## Credits
 
 Huge thanks to ÚFAL, for releasing the opensource [SimulStreaming](https://github.com/ufal/SimulStreaming) repository. This project wouldn't be half as efficient without them.
+
+## License
+MIT
+

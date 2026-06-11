@@ -14,6 +14,8 @@ dependencies = [
     "openwakeword==0.6.0",
     "piper-tts[http]==1.4.2",
     "tzdata==2026.2",
+    "pydantic-settings==2.14.1",  # env-var config loading (config.py)
+    "python-dotenv==1.2.2",       # loads .env.example / .env into the environment
     "numpy<2; python_version < '3.14'",  # <2 mandatory for Jetson; >=3.14 needs numpy 2.x wheels
     "onnxruntime<1.24; python_version < '3.11'",
 ]
