@@ -47,6 +47,7 @@ class ToolsConfig:
     enabled_tool_modules: list[str] = field(
         default_factory=lambda: ["math_tools", "datetime_tools", "random_tools", "memory_tools"]
     )
+    tool_timeout: float = 15.0 # max seconds to wait for a tool response before aborting and returning an error to the model
     # Appended to LLMClientConfig.system_instructions only when "memory_tools" is enabled above.
     memory_system_instructions: str = (
         "You have persistent memory tools. Use store_memory to save facts the user shares "

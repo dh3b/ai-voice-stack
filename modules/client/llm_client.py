@@ -200,7 +200,7 @@ class LLMClient:
             messages.append(assistant_message)
 
             for tc in pending_tool_calls.values():
-                result_str = registry.call(tc["name"], tc["arguments"])
+                result_str = await self._call_tool(tc["name"], tc["arguments"])
                 logger.info(f"tool call {tc['name']}({tc['arguments']}): {result_str}")
 
                 messages.append({
@@ -216,6 +216,16 @@ class LLMClient:
             logger.warning(f"Reached max iterations ({self._config.max_iterations}) without completing.")
 
         return "".join(total_spoken)
+
+    async def _call_tool(self, name: str, arguments: str) -> str:
+        timeout = self._tools_config.tool_timeout
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(registry.call, name, arguments), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"tool {name} timed out after {timeout}s; aborting the call.")
+            return f"Error running {name}: timed out after {timeout} seconds."
 
 
 if __name__ == "__main__":

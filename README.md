@@ -89,6 +89,7 @@ LLMClientConfig.history_max_turns # How much messages (ai-user pairs) aback shou
 LLMClientConfig.history_idle_timeout_s # After how much seconds should the earliest message be wiped from memory
 
 ToolsConfig.enabled_tool_modules # which tool modules to load
+ToolsConfig.tool_timeout         # max seconds per tool call before the model gets a timeout error
 ToolsConfig.memory_db_path       # SQLite file backing persistent memory
 
 OWWClientConfig.model_paths      # wake word .onnx model(s)
@@ -133,7 +134,7 @@ def get_weather(city: str) -> str:
     return "Clear, 18C."   # the returned string is fed back to the model
 ```
 
-Then add the module name to `ToolsConfig.enabled_tool_modules` (here, `"weather_tools"`). The handler's return value goes back to the model as the tool result; raised exceptions are caught and returned as an error string, so the turn does not crash.
+Then add the module name to `ToolsConfig.enabled_tool_modules` (here, `"weather_tools"`). The handler's return value goes back to the model as the tool result; raised exceptions are caught and returned as an error string, so the turn does not crash. Handlers run on a timed out worker thread so a slow tool never stalls.
 
 > [!NOTE]
 > Feel free to fork the repository and add some tools yourself. I'd be glad to see them.
