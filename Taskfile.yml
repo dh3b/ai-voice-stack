@@ -56,3 +56,13 @@ tasks:
     desc: Remove build scratch (.build/)
     cmds:
       - uv run python -m installer clean
+
+  test:
+    desc: "Run the fast unit tests (tier 1; no models, servers, or audio devices)"
+    cmds:
+      - uv run pytest tests/unit {{.CLI_ARGS}}
+
+  smoke:
+    desc: "Run the smoke tests (tier 2; boots the real servers against local or CI-tiny models)"
+    cmds:
+      - uv run pytest tests/smoke -m smoke {{.CLI_ARGS}}

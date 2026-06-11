@@ -1,0 +1,97 @@
+name: smoke
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *" # nightly, 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      UV_NO_SYNC: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false # CI uses tiny upstream substitutes, never the repo's LFS models
+
+      - name: Resolve llama.cpp ref (build-cache key)
+        id: llama
+        run: echo "ref=$(grep -oP 'LLAMA_REF = \"\K[^\"]+' installer/build_llama.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libportaudio2 libsndfile1 build-essential cmake ninja-build git
+
+      - name: Install dependencies (base + dev group)
+        run: uv sync --inexact
+
+      - name: Install torch (CPU) via the installer
+        run: uv run python -m installer torch
+
+      - name: Cache SimulStreaming clone
+        uses: actions/cache@v4
+        with:
+          path: simulstreaming_lib
+          key: simulstreaming-${{ runner.os }}-v1
+
+      - name: Provision STT backend (clone SimulStreaming + requirements)
+        run: uv run python -m installer stt
+
+      - name: Cache llama-server build
+        uses: actions/cache@v4
+        with:
+          path: llama_cpp_bin
+          key: llama-${{ runner.os }}-${{ steps.llama.outputs.ref }}
+
+      - name: Build llama-server via the installer
+        # Doubles as installer build-regression coverage on Linux. No-op on a cache hit.
+        run: uv run python -m installer llama
+
+      - name: Cache tiny model substitutes
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/voice-stack-models
+          key: test-models-${{ runner.os }}-v2
+
+      - name: Fetch tiny model substitutes
+        run: |
+          set -euo pipefail
+          DIR="$HOME/.cache/voice-stack-models"
+          mkdir -p "$DIR"
+          dl() { [ -f "$2" ] || curl -L -f --retry 3 -o "$2" "$1"; }
+          dl https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf "$DIR/qwen.gguf"
+          dl https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt "$DIR/tiny.pt"
+          dl https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx "$DIR/voice.onnx"
+          dl https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json "$DIR/voice.onnx.json"
+          # The repo's hey_jarvis model is LFS (not pulled); fetch openwakeword's copy instead.
+          uv run python -c "import os, shutil, openwakeword, openwakeword.utils; openwakeword.utils.download_models(); shutil.copyfile(os.path.join(os.path.dirname(openwakeword.__file__), 'resources', 'models', 'hey_jarvis_v0.1.onnx'), '$DIR/hey_jarvis.onnx')"
+          {
+            echo "VOICE_STACK_TEST_LLM=$DIR/qwen.gguf"
+            echo "VOICE_STACK_TEST_STT=$DIR/tiny.pt"
+            echo "VOICE_STACK_TEST_TTS=$DIR/voice.onnx"
+            echo "VOICE_STACK_TEST_WAKEWORD=$DIR/hey_jarvis.onnx"
+          } >> "$GITHUB_ENV"
+
+      - name: Run smoke tests (one retry on flaky model output)
+        run: task smoke -- --reruns 1 --reruns-delay 5

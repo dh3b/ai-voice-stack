@@ -1,5 +1,8 @@
 # ai-voice-stack
 
+[![unit](https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml/badge.svg)](https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml)
+[![smoke](https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml/badge.svg)](https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml)
+
 ## What it is
 
 A local voice assistant. It listens for a wake word, transcribes what you say, runs it through a language model that can call tools, and speaks the reply. Wake word, speech-to-text, LLM, and text-to-speech all run on your own machine - no cloud, nothing leaves the device - and it is built to run on edge hardware such as Jetson boards.
