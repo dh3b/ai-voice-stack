@@ -7,13 +7,42 @@ name = "ai-voice-stack"
 version = "0.0.0"
 description = "Local voice assistant stack (wakeword + STT + LLM + TTS)."
 requires-python = ">=3.10"
-# Runtime dependencies are intentionally NOT listed here; they stay in
-# requirments.txt / requirements_whisper.txt so the pinned (e.g. Jetson) torch/numpy
-# setup is untouched. This package is installed with `pip install -e .` purely to put
-# the repo root on sys.path, making `config` and `modules` importable from anywhere.
+dependencies = [
+    "openai==2.37.0",
+    "httpx==0.28.1",
+    "sounddevice==0.5.5",
+    "openwakeword==0.6.0",
+    "piper-tts[http]==1.4.2",
+    "tzdata==2026.2",
+    "numpy<2; python_version < '3.14'",  # <2 mandatory for Jetson; >=3.14 needs numpy 2.x wheels
+    "onnxruntime<1.24; python_version < '3.11'",
+]
+
+# torch / torchaudio are intentionally NOT listed here. The correct wheel depends on
+# the runtime machine (CPU index vs cuXXX vs the Jetson/JetPack index), so the
+# provisioner installs them with the detected index (installer/setup_torch.py), and
+# `uv sync --inexact` is used everywhere so syncing never strips them back out.
+
+# Test-only deps. Kept out of [project.dependencies] so a normal install stays lean
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.24",
+    "pytest-rerunfailures>=14.0",
+]
+
+[tool.pytest.ini_options]
+# repo root on sys.path so `import config` / `import modules...` work from any CWD.
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "smoke: real-component test that boots a server or loads a model (tier 2); excluded from the fast unit run",
+]
 
 [tool.setuptools]
 py-modules = ["config"]
 
 [tool.setuptools.packages.find]
-include = ["modules*"]
+include = ["modules*", "installer*"]

@@ -1,13 +1,28 @@
 import asyncio
 import logging
+import os
 import threading
 import numpy as np
 import sounddevice as sd
+import openwakeword
+import openwakeword.utils
 from openwakeword.model import Model
 
 from config import OWWClientConfig, AppConfig
 
 logger = logging.getLogger("voice_stack.oww")
+
+
+def _ensure_frontend_models() -> None:
+    """Fetch openwakeword's shared melspectrogram/embedding frontend once if absent.
+
+    These ship outside the wheel and aren't user-configurable, unlike the wakeword
+    model in config. A non-matching name pulls only the frontend, not every wakeword.
+    """
+    models_dir = os.path.join(os.path.dirname(openwakeword.__file__), "resources", "models")
+    if not os.path.exists(os.path.join(models_dir, "melspectrogram.onnx")):
+        logger.info("Fetching openwakeword frontend models...")
+        openwakeword.utils.download_models(["none"])
 
 
 class OWWClient:
@@ -16,6 +31,7 @@ class OWWClient:
         self._stop_event = threading.Event()
         self._settle_threshold = max(0.1, config.threshold * 0.4)
         self._settle_chunks = 5
+        _ensure_frontend_models()
         try:
             self._model = Model(
                 wakeword_models=self._config.model_paths,

@@ -1,0 +1,68 @@
+# Command palette. Each task is a thin call into uv or the installer package; all
+# platform/accelerator divergence lives in installer/, not here.
+# Prerequisites: uv and task (see README). Pass flags after `--`, e.g. `task setup -- --force`.
+env:
+  UV_NO_SYNC: "1"
+version: "3"
+silent: true
+
+tasks:
+  default:
+    desc: Show the machine profile and what's installed / missing
+    cmds:
+      - task: doctor
+
+  setup:
+    desc: "Detect the machine and install everything (idempotent). Flags: -- --force --jobs N"
+    cmds:
+      - uv run python -m installer setup {{.CLI_ARGS}}
+
+  run:
+    desc: Launch the full stack (llm + stt + tts servers, then the assistant)
+    cmds:
+      - uv run python -m installer run {{.CLI_ARGS}}
+
+  doctor:
+    desc: Report the detected profile and any gaps
+    cmds:
+      - uv run python -m installer doctor {{.CLI_ARGS}}
+
+  detect:
+    desc: Print the raw detection profile as JSON
+    cmds:
+      - uv run python -m installer detect {{.CLI_ARGS}}
+
+  toolchain:
+    desc: Ensure the build toolchain (cmake, ninja, C++ compiler, CUDA)
+    cmds:
+      - uv run python -m installer toolchain {{.CLI_ARGS}}
+
+  torch:
+    desc: Install torch/torchaudio for the detected accelerator
+    cmds:
+      - uv run python -m installer torch {{.CLI_ARGS}}
+
+  stt:
+    desc: Clone SimulStreaming and install its requirements
+    cmds:
+      - uv run python -m installer stt {{.CLI_ARGS}}
+
+  llama:
+    desc: Build llama.cpp's llama-server from source
+    cmds:
+      - uv run python -m installer llama {{.CLI_ARGS}}
+
+  clean:
+    desc: Remove build scratch (.build/)
+    cmds:
+      - uv run python -m installer clean
+
+  test:
+    desc: "Run the fast unit tests (tier 1; no models, servers, or audio devices)"
+    cmds:
+      - uv run pytest tests/unit {{.CLI_ARGS}}
+
+  smoke:
+    desc: "Run the smoke tests (tier 2; boots the real servers against local or CI-tiny models)"
+    cmds:
+      - uv run pytest tests/smoke -m smoke {{.CLI_ARGS}}

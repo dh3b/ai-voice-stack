@@ -1,5 +1,8 @@
 # ai-voice-stack
 
+[![unit](https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml/badge.svg)](https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml)
+[![smoke](https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml/badge.svg)](https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml)
+
 ## What it is
 
 A local voice assistant. It listens for a wake word, transcribes what you say, runs it through a language model that can call tools, and speaks the reply. Wake word, speech-to-text, LLM, and text-to-speech all run on your own machine - no cloud, nothing leaves the device - and it is built to run on edge hardware such as Jetson boards.
@@ -14,61 +17,91 @@ A turn runs left to right: the wake word listener (openwakeword) triggers on loa
 
 ## Compatibility
 
-- Linux and Windows. Targets edge devices such as NVIDIA Jetson. Also tested specifically on RPI4/5, but mind the speed is not that great.
-- Python 3.10+.
+- Windows and Linux, on x86_64 and arm64. Targets edge devices such as NVIDIA Jetson; also runs on RPi 4/5 (CPU only, slow).
+- Python 3.10+ (provided/managed by `uv` - you don't need it preinstalled).
 - A microphone and a speaker.
 - A CUDA-capable GPU is recommended; CPU works but the LLM and Whisper will be slow.
-- A llama.cpp build that provides `llama-server` (OpenAI-compatible API). The STT and ML dependencies (torch, etc.) come from the SimulStreaming repo below, not from this one.
 
-The LLM server invokes `llama_cpp_bin/llama-server.exe`; on Linux use your platform's binary name and change it in config (see [installation](#installation)).
+There is **no manual build step**. The installer detects your machine and builds
+`llama-server`, fetches the models, installs the right `torch`, and clones the STT
+backend for you - see below.
+
+> [!TIP]
+> If you encounter any installation problems, you can always build the dependencies yourself, and link the paths in `config.py`, also view [troubleshooting](#trouble).
 
 ## <a name="installation"></a>Installation
 
-1. Clone and install the app layer:
+Two prerequisites - **`uv`** (Python/venv/deps) and **`task`** ([go-task](https://taskfile.dev), the command runner):
 
-   ```
-   git clone https://github.com/dh3b/ai-voice-stack
-   cd ai-voice-stack
-   python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
-   pip install -e .
-   pip install -r requirements.txt
-   ```
+| | uv | task |
+|---|---|---|
+| **Windows** | `powershell -c "irm https://astral.sh/uv/install.ps1 \| iex"` | `winget install Task.Task` |
+| **Linux** | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `sudo apt install task` |
 
-2. Speech-to-text engine. Clone one of these into `simulstreaming_lib/` and install its requirements - this supplies torch, Whisper, and the streaming server the STT server launches:
-
-   ```
-   git clone https://github.com/ufal/SimulStreaming simulstreaming_lib
-   # or the trimmed fork:
-   git clone https://github.com/dh3b/SimulStreaming-lite simulstreaming_lib
-   ```
-    And make sure to download needed requirements for the `simulstreaming_lib` with:
-   ```
-   pip install -r requirements_whisper.txt
-   ```
-
-3. llama.cpp. Build `llama-server` from source or download a prebuilt binary, and place it in `llama_cpp_bin/`. (`modules/server/llm_server.py` calls `llama_cpp_bin/llama-server.exe` - adjust the name for your platform). For more installation instructions just visit the [llama.cpp](https://github.com/ggml-org/llama.cpp) repo.
-
-4. Models. Download into `models/`:
-
-   | Model example | File(s) example | Used for |
-   |---|---|---|
-   | Qwen2.5-3B-Instruct (Q4_K_M GGUF) | `Qwen2.5-3B-Instruct-Q4_K_M.gguf` | the LLM - replies and tool calls |
-   | Whisper base | `whisper-base.pt` | speech-to-text |
-   | Piper en_US-lessac-medium | `en_US-lessac-medium.onnx` (+ `.onnx.json`) | text-to-speech |
-   | openwakeword "hey jarvis" | `hey_jarvis_v0.1.onnx` | wake word |
-
-   Any GGUF chat model with tool-calling can replace Qwen, set its path in config.
-
-### Run
-
-Start the three servers (each supervises its backend), then the assistant:
+Then:
 
 ```
-python -m modules.server.llm_server
-python -m modules.server.stt_server
-python -m modules.server.tts_server
-python pipeline.py
+git clone https://github.com/dh3b/ai-voice-stack
+cd ai-voice-stack
+task setup     # detects the machine, installs deps + torch, builds llama.cpp, fetches models
+task run       # launches wakeword + STT + LLM + TTS
 ```
+
+If you want to use the example models, **you need to have git lfs installed**. If the models still don't work after cloning, make sure to run `git lfs pull` inside the repo.
+
+`task setup` can fail when a step genuinely can't
+self-install (typically a system C++ compiler, or a full CUDA toolkit on Windows),
+it stops with the exact command to run - fix it and re-run `task setup` to continue.
+Run `task doctor` any time to see the detected profile and what's still missing.
+
+Everything lands **inside the repo**, never your global environment: the venv in
+`.venv/`, the LLM server in `llama_cpp_bin/`, models in `models/`, the STT backend
+in `simulstreaming_lib/`.
+
+### Models
+
+Set the model paths in `config.py`. Examples are provided within the repo, feel free to switch them out.
+
+**To use a different model:** point its path in `config.py` at your file and drop the
+file in `models/` yourself. The installer never overwrites a file that already exists,
+so it won't clobber yours. Run `task doctor` once you're done, to confirm everything was done right.
+
+| Model | File | Used for |
+|---|---|---|
+| Qwen2.5-3B-Instruct (Q4_K_M GGUF) | `Qwen2.5-3B-Instruct-Q4_K_M.gguf` | the LLM - replies and tool calls |
+| Whisper base | `whisper-base.pt` | speech-to-text |
+| Piper en_US-lessac-medium | `en_US-lessac-medium.onnx` (+ `.onnx.json`) | text-to-speech |
+| openwakeword "hey jarvis" | `hey_jarvis_v0.1.onnx` | wake word |
+
+### Granular & advanced
+
+Each phase is a task you can run on its own, and re-running is cheap:
+
+```
+task doctor          # report machine profile + gaps
+task toolchain       # cmake / ninja / compiler / CUDA
+task torch           # torch+torchaudio for the detected accelerator
+task stt             # clone SimulStreaming + install its requirements
+task llama           # build llama.cpp's llama-server
+task llama -- --force --jobs 4   # flags pass through after `--`
+```
+
+- **GPU offload:** after a CUDA `llama` build, set `gpu_layers=99` (and
+  `flash_attn=True`) in `LLMServerConfig` in `config.py` to run the LLM on the GPU.
+- **Pinned versions:** the llama.cpp ref is `LLAMA_REF` in `installer/build_llama.py`;
+  the SimulStreaming ref is `SIMUL_REF` in `installer/setup_stt.py`.
+
+### <a name="trouble"></a>Troubleshooting
+
+- **No C++ compiler** - Windows: install "Build Tools for Visual Studio 2022" with the
+  *Desktop development with C++* workload; Linux: `sudo apt-get install -y build-essential`.
+  Then re-run `task setup`.
+- **CUDA build can't find `nvcc`** - install a CUDA toolkit matching your driver, or let
+  the installer try the experimental pip CUDA-wheel route; re-run `task setup`.
+- **Jetson** - building on-device is expected; watch power/thermal with `tegrastats`,
+  lower `task llama -- --jobs N` or `nvpmodel` if the board resets. The CUDA/Jetson torch
+  stack needs `numpy<2`; the installer pins it, so prefer `task setup`/`task torch` over a
+  bare `uv sync` (which would restore the locked `numpy 2`).
 
 ## Configuration
 
