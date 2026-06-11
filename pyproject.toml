@@ -23,6 +23,24 @@ dependencies = [
 # provisioner installs them with the detected index (installer/setup_torch.py), and
 # `uv sync --inexact` is used everywhere so syncing never strips them back out.
 
+# Test-only deps. Kept out of [project.dependencies] so a normal install stays lean
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.24",
+    "pytest-rerunfailures>=14.0",
+]
+
+[tool.pytest.ini_options]
+# repo root on sys.path so `import config` / `import modules...` work from any CWD.
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "smoke: real-component test that boots a server or loads a model (tier 2); excluded from the fast unit run",
+]
+
 [tool.setuptools]
 py-modules = ["config"]
 

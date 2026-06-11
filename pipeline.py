@@ -26,23 +26,35 @@ tts_cfg = cfg.TTSClientConfig()
 llm_cfg = cfg.LLMClientConfig()
 tools_cfg = cfg.ToolsConfig()
 
-oww_client = OWWClient(oww_cfg)
-stt_client = STTClient(stt_cfg)
-tts_client = TTSClient(tts_cfg)
-llm_client = LLMClient(llm_cfg, tools_cfg)
+oww_client: OWWClient | None = None
+stt_client: STTClient | None = None
+tts_client: TTSClient | None = None
+llm_client: LLMClient | None = None
 
 
-async def run_turn(transcript: str) -> None:
+def _init_clients() -> None:
+    global oww_client, stt_client, tts_client, llm_client
+    oww_client = OWWClient(oww_cfg)
+    stt_client = STTClient(stt_cfg)
+    tts_client = TTSClient(tts_cfg)
+    llm_client = LLMClient(llm_cfg, tools_cfg)
+
+
+async def run_turn(transcript: str, llm=None, tts=None, response_timeout: float | None = None) -> None:
     """Run one LLM->TTS turn"""
+    llm = llm if llm is not None else llm_client
+    tts = tts if tts is not None else tts_client
+    if response_timeout is None:
+        response_timeout = llm_cfg.response_timeout
     response_queue: asyncio.Queue = asyncio.Queue()
-    llm_task = asyncio.create_task(llm_client.run(transcript, response_queue))
-    tts_task = asyncio.create_task(tts_client.play(response_queue))
+    llm_task = asyncio.create_task(llm.run(transcript, response_queue))
+    tts_task = asyncio.create_task(tts.play(response_queue))
 
     try:
         # wait_for cancels llm_task if it overruns the budget.
-        await asyncio.wait_for(llm_task, timeout=llm_cfg.response_timeout)
+        await asyncio.wait_for(llm_task, timeout=response_timeout)
     except asyncio.TimeoutError:
-        logger.warning(f"LLM exceeded {llm_cfg.response_timeout}s; ending turn.")
+        logger.warning(f"LLM exceeded {response_timeout}s; ending turn.")
     except Exception as e:
         logger.error(f"LLM error: {e!r}; ending turn.")
     finally:
@@ -86,6 +98,7 @@ async def run_turn_with_bargein(transcript: str) -> bool:
 
 
 async def main():
+    _init_clients()
     transcript_queue: asyncio.Queue[str] = asyncio.Queue()
     skip_wakeword = False  # set after a barge-in or to enter continuation listening
     listen_timeout = None  # None => default response_timeout; set => continuation follow-up window
@@ -137,4 +150,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Shutting down...")
-        oww_client.stop()
+        if oww_client is not None:
+            oww_client.stop()
