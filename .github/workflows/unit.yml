@@ -17,8 +17,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          # numpy 1.26.x (pinned for <3.14) ships cp312 wheels, so syncing needs no C build.
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Install task
         uses: arduino/setup-task@v2
