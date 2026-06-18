@@ -251,7 +251,7 @@ def download(
             fail(
                 f"checksum mismatch: {name}",
                 f"{url}\nexpected sha256 {sha256}\nactual   sha256 {actual}\n"
-                "The source may have changed. Update installer/models.toml or retry.",
+                "The source may have changed. Update installer/models.py or retry.",
             )
 
     part.replace(dest)

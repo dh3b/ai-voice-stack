@@ -36,13 +36,9 @@ LOGS_DIR = REPO_ROOT / "logs"
 
 
 def _looks_real(path: Path, min_bytes: int = 50_000) -> bool:
-    """True if `path` is a real model file, not a missing file or an unfetched git-LFS
-    pointer (those are ~130 bytes of text starting with 'version https://git-lfs')."""
+    """True if `path` is a real model file present on disk (not missing or a tiny stub)."""
     try:
-        if path.stat().st_size < min_bytes:
-            return False
-        with open(path, "rb") as fh:
-            return not fh.read(20).startswith(b"version https://")
+        return path.stat().st_size >= min_bytes
     except OSError:
         return False
 

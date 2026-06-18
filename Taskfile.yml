@@ -52,6 +52,11 @@ tasks:
     cmds:
       - uv run python -m installer llama {{.CLI_ARGS}}
 
+  models:
+    desc: "Download the example models into models/ (idempotent; keeps your own). Flags: -- --force"
+    cmds:
+      - uv run python -m installer models {{.CLI_ARGS}}
+
   clean:
     desc: Remove build scratch (.build/)
     cmds:

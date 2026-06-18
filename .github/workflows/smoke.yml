@@ -18,8 +18,6 @@ jobs:
       UV_NO_SYNC: "1"
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: false # CI uses tiny upstream substitutes, never the repo's LFS models
 
       - name: Resolve llama.cpp ref (build-cache key)
         id: llama
@@ -84,7 +82,7 @@ jobs:
           dl https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt "$DIR/tiny.pt"
           dl https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx "$DIR/voice.onnx"
           dl https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json "$DIR/voice.onnx.json"
-          # The repo's hey_jarvis model is LFS (not pulled); fetch openwakeword's copy instead.
+          # The repo's example models aren't in the checkout; fetch openwakeword's copy instead.
           uv run python -c "import os, shutil, openwakeword, openwakeword.utils; openwakeword.utils.download_models(); shutil.copyfile(os.path.join(os.path.dirname(openwakeword.__file__), 'resources', 'models', 'hey_jarvis_v0.1.onnx'), '$DIR/hey_jarvis.onnx')"
           {
             echo "VOICE_STACK_TEST_LLM=$DIR/qwen.gguf"

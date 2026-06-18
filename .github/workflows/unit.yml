@@ -10,8 +10,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: false # never pull the repo's LFS models (bandwidth quota)
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5

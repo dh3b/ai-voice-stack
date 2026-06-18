@@ -146,8 +146,9 @@ def run(ready_timeout: float = 300.0) -> int:
     if gaps:
         util.fail(
             "missing model files",
-            "Put each model at the path config.py expects, then re-run:\n"
-            + "\n".join(f"  - {label:18s} {path}" for label, path in gaps),
+            "Fetch the examples with `task models`, or put each model at the path "
+            "config.py expects, then re-run:\n"
+            + "\n".join(f"  - {m.label:18s} {m.path}" for m in gaps),
             rerun="task run",
         )
 

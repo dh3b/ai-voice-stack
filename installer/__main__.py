@@ -3,7 +3,7 @@ hard dependency):
 
     uv run python -m installer doctor
     uv run python -m installer setup [--force] [--jobs N]
-    uv run python -m installer <torch|stt|llama|toolchain|run|clean>
+    uv run python -m installer <torch|stt|llama|models|toolchain|run|clean>
 """
 
 from __future__ import annotations
@@ -96,13 +96,13 @@ def cmd_doctor(args) -> int:
     for k in ("git", "cmake", "ninja", "compiler", "nvcc"):
         log("    [%s] %s", "x" if p.has.get(k) else " ", k)
 
-    log("\n  models (provide these yourself):")
-    for label, path in models.REQUIRED:
-        present = models.resolve(path).exists()
+    log("\n  models (run `task models`, or supply your own):")
+    for m in models.REQUIRED:
+        present = models.resolve(m.path).exists()
         log(
             "    [%s] %-44s %s",
             "x" if present else " ",
-            path,
+            m.path,
             "" if present else "missing",
         )
 
@@ -126,7 +126,7 @@ def cmd_doctor(args) -> int:
     )
     log(
         "\n  %s",
-        "Gaps found - run `task setup` (and place any missing models), then `task run`."
+        "Gaps found - run `task setup` and `task models` (or supply your own models), then `task run`."
         if gaps
         else "All set. Run `task run`.",
     )
@@ -147,10 +147,11 @@ def cmd_setup(args) -> int:
     gaps = models.missing()
     if gaps:
         util.logger.info(
-            "Place these models where config.py expects them, then `task run`:"
+            "Fetch the example models with `task models`, or place your own where\n"
+            "config.py expects them, then `task run`. Missing:"
         )
-        for label, path in gaps:
-            util.logger.info("  - %-18s %s", label, path)
+        for m in gaps:
+            util.logger.info("  - %-18s %s", m.label, m.path)
     else:
         util.logger.info("Launch the stack with:  task run")
     return 0
@@ -173,6 +174,11 @@ def cmd_stt(args) -> int:
 
 def cmd_llama(args) -> int:
     build_llama.build(detect.detect(), jobs=args.jobs, force=args.force)
+    return 0
+
+
+def cmd_models(args) -> int:
+    models.fetch(force=args.force)
     return 0
 
 
@@ -231,6 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add("stt", cmd_stt, force=True, help="clone SimulStreaming + install requirements")
     add("llama", cmd_llama, force=True, jobs=True, help="build llama.cpp llama-server")
+    add("models", cmd_models, force=True, help="download the example models")
     add("run", cmd_run, help="launch the stack (servers + pipeline)")
     add("clean", cmd_clean, help="remove build scratch (.build/)")
     return ap

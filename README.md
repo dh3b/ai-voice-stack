@@ -23,8 +23,8 @@ A turn runs left to right: the wake word listener (openwakeword) triggers on loa
 - A CUDA-capable GPU is recommended; CPU works but the LLM and Whisper will be slow.
 
 There is **no manual build step**. The installer detects your machine and builds
-`llama-server`, fetches the models, installs the right `torch`, and clones the STT
-backend for you - see below.
+`llama-server`, installs the right `torch`, and clones the STT backend for you; a
+separate `task models` downloads the example models - see below.
 
 > [!TIP]
 > If you encounter any installation problems, you can always build the dependencies yourself, and link the paths in `config.py`, also view [troubleshooting](#trouble).
@@ -32,7 +32,6 @@ backend for you - see below.
 ## <a name="installation"></a>Installation
 
 Two prerequisites - **`uv`** (Python/venv/deps) and **`task`** ([go-task](https://taskfile.dev), the command runner).
-If you want to use the example models, **you need to have git-lfs installed**, then clone the repository. If the models still don't work after cloning or you just installed git-lfs, make sure to run `git lfs pull` inside the repo.
 
 | | uv | task |
 |---|---|---|
@@ -44,7 +43,8 @@ Then:
 ```
 git clone https://github.com/dh3b/ai-voice-stack
 cd ai-voice-stack
-task setup     # detects the machine, installs deps + torch, builds llama.cpp, fetches models
+task setup     # detects the machine, installs deps + torch, builds llama.cpp
+task models    # downloads the example models (skip if you'll supply your own)
 task run       # launches wakeword + STT + LLM + TTS
 ```
 
@@ -59,11 +59,15 @@ in `simulstreaming_lib/`.
 
 ### Models
 
-Set the model paths in `config.py`. Examples are provided within the repo, feel free to switch them out.
+`task models` downloads the example models below into `models/`. They're no longer
+committed to the repo, so cloning stays lightweight - fetching them is this one
+explicit, idempotent step. Set the model paths in `config.py`; feel free to switch
+them out.
 
 **To use a different model:** point its path in `config.py` at your file and drop the
-file in `models/` yourself. The installer never overwrites a file that already exists,
-so it won't clobber yours. Run `task doctor` once you're done, to confirm everything was done right.
+file in `models/` yourself. `task models` never overwrites a file that already exists,
+so it won't clobber yours (use `task models -- --force` to re-fetch the defaults).
+Run `task doctor` once you're done, to confirm everything was done right.
 
 | Model | File | Used for |
 |---|---|---|
@@ -83,6 +87,7 @@ task torch           # torch+torchaudio for the detected accelerator
 task stt             # clone SimulStreaming + install its requirements
 task llama           # build llama.cpp's llama-server
 task llama -- --force --jobs 4   # flags pass through after `--`
+task models          # download the example models (-- --force to re-fetch)
 task test            # run unit tests
 task smoke           # run smoke tests
 task clean           # clean build scratch (recommended to offload space after build)
