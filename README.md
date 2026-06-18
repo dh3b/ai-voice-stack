@@ -2,10 +2,67 @@
 
 [![unit](https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml/badge.svg)](https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml)
 [![smoke](https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml/badge.svg)](https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml)
+[![GitHub contributors](https://img.shields.io/github/contributors/dh3b/ai-voice-stack)](https://github.com/dh3b/ai-voice-stack/graphs/contributors)
+[![GitHub issues](https://img.shields.io/github/issues/dh3b/ai-voice-stack)](https://github.com/dh3b/ai-voice-stack/issues)
 
 ## What it is
 
 A local voice assistant. It listens for a wake word, transcribes what you say, runs it through a language model that can call tools, and speaks the reply. Wake word, speech-to-text, LLM, and text-to-speech all run on your own machine - no cloud, nothing leaves the device - and it is built to run on edge hardware such as Jetson boards.
+
+## Quick demo
+
+<table>
+<tr>
+<td width="50%">
+
+[![Watch the video](demo/thumbnail.png)](demo/IMG_8853.mov)
+
+</td>
+<td width="50%">
+
+### Overview
+
+This request took about 2,5seconds to complete (TTFT):
+```
+[voice_stack.latency]: Turn timings (ms):
+[voice_stack.latency]: endpoint_final -> llm_first_token 2092.2
+[voice_stack.latency]: llm_first_token -> tts_first_chunk 491.6
+[voice_stack.latency]: tts_first_chunk -> audio_first_write 17.3
+[voice_stack.latency]: TOTAL endpoint_final -> audio_first_write: 2601.1
+```
+
+#### Notes
+
+Usually the chatbot returns the first token in sub 1 second timing. In this example and agent was used to yield the current time.
+
+But with both agent capabilities and the stack being local, it can be used for complete safe hardware use, like camera control or smart home integration.
+
+</td>
+</tr>
+</table>
+
+### Full logs of that query look like this:
+
+```
+[oww]: Listening for wakewords...
+[oww]: Wakeword detected with score 0.98698/0.5
+[main]: Wakeword detected. Starting STT...
+[stt]: Connected to 127.0.0.1:43002
+[stt]: Streaming audio to SimulStreaming server...
+[stt partial] What's thetime
+[stt]: transcript: 'What's the time'
+[main]: Transcript: What's the time
+[main]: Starting LLM/TTS turn...
+[oww]: Listening for wakewords...
+[llm]: tool call get_current_time({"timezone": null}): It's 1:51 PM on Thursday, June 18, 2026 (local time).
+The current time is 1:51 PM on Thursday, June 18, 2026. Is there anything you need to know about the time in a different timezone?
+[latency]: Turn timings (ms):
+[latency]:      endpoint_final -> llm_first_token        2092.2
+[latency]:      llm_first_token -> tts_first_chunk       491.6
+[latency]:      tts_first_chunk -> audio_first_write     17.3
+[latency]: TOTAL    endpoint_final -> audio_first_write: 2601.1
+[oww]: Listening for wakewords...
+```
 
 ## How it works
 
@@ -59,9 +116,7 @@ in `simulstreaming_lib/`.
 
 ### Models
 
-`task models` downloads the example models below into `models/`. They're no longer
-committed to the repo, so cloning stays lightweight - fetching them is this one
-explicit, idempotent step. Set the model paths in `config.py`; feel free to switch
+`task models` downloads the example models below into `models/`. Set the model paths in `config.py`; feel free to switch
 them out.
 
 **To use a different model:** point its path in `config.py` at your file and drop the
