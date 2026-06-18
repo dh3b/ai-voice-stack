@@ -12,20 +12,11 @@ import argparse
 import shutil
 import sys
 
-from . import (
-    build_llama,
-    detect,
-    models,
-    runtime_libs,
-    serve,
-    setup_stt,
-    setup_torch,
-    tools,
-    util,
-)
+from . import detect, runtime_libs, util
 
 
 def _ensure_toolchain(p) -> None:
+    from . import tools
     util.banner("Build toolchain")
     tools.ensure_cmake_ninja(p)
     tools.ensure_compiler(p)
@@ -83,6 +74,8 @@ def cmd_detect(args) -> int:
 
 
 def cmd_doctor(args) -> int:
+    from . import models, build_llama, setup_torch
+    
     p = detect.detect()
     log = util.logger.info
     log("ai-voice-stack - doctor\n")
@@ -134,10 +127,15 @@ def cmd_doctor(args) -> int:
 
 
 def cmd_setup(args) -> int:
+    from . import setup_torch, setup_stt, build_llama
+    
     p = detect.detect()
     util.logger.info("Profile: %s\n", p.summary())
     runtime_libs.ensure(p)
     _uv_sync()
+    
+    from . import models  # Import after _uv_sync installs pydantic
+    
     _ensure_toolchain(p)  # fail-fast on a missing compiler before the build
     setup_torch.install(p, force=args.force)
     setup_stt.install(p, force=args.force)
@@ -163,26 +161,31 @@ def cmd_toolchain(args) -> int:
 
 
 def cmd_torch(args) -> int:
+    from . import setup_torch
     setup_torch.install(detect.detect(), force=args.force)
     return 0
 
 
 def cmd_stt(args) -> int:
+    from . import setup_stt
     setup_stt.install(detect.detect(), force=args.force)
     return 0
 
 
 def cmd_llama(args) -> int:
+    from . import build_llama
     build_llama.build(detect.detect(), jobs=args.jobs, force=args.force)
     return 0
 
 
 def cmd_models(args) -> int:
+    from . import models
     models.fetch(force=args.force)
     return 0
 
 
 def cmd_run(args) -> int:
+    from . import serve
     return serve.run()
 
 
