@@ -1,9 +1,19 @@
-# ai-voice-stack
+<h1 align="center">ai-voice-stack</h1>
 
-[![unit](https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml/badge.svg)](https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml)
-[![smoke](https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml/badge.svg)](https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml)
-[![GitHub contributors](https://img.shields.io/github/contributors/dh3b/ai-voice-stack)](https://github.com/dh3b/ai-voice-stack/graphs/contributors)
-[![GitHub issues](https://img.shields.io/github/issues/dh3b/ai-voice-stack)](https://github.com/dh3b/ai-voice-stack/issues)
+<p align="center">
+  <a href="https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml">
+    <img src="https://github.com/dh3b/ai-voice-stack/actions/workflows/unit.yml/badge.svg">
+  </a>
+  <a href="https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml">
+    <img src="https://github.com/dh3b/ai-voice-stack/actions/workflows/smoke.yml/badge.svg">
+  </a>
+  <a href="https://github.com/dh3b/ai-voice-stack/graphs/contributors">
+    <img src="https://img.shields.io/github/contributors/dh3b/ai-voice-stack">
+  </a>
+  <a href="https://github.com/dh3b/ai-voice-stack/issues">
+    <img src="https://img.shields.io/github/issues/dh3b/ai-voice-stack">
+  </a>
+</p>
 
 ## What it is
 
@@ -13,16 +23,16 @@ A local voice assistant. It listens for a wake word, transcribes what you say, r
 
 <table>
 <tr>
-<td width="50%">
+<td width="65%">
 
 [![Watch the video](demo/thumbnail.png)](demo/IMG_8853.mov)
 
 </td>
-<td width="50%">
+<td width="35%">
 
 ### Overview
 
-This request took about 2,5seconds to complete (TTFT):
+This request took about 2,5 seconds to complete (TTFT):
 ```
 [voice_stack.latency]: Turn timings (ms):
 [voice_stack.latency]: endpoint_final -> llm_first_token 2092.2
@@ -33,7 +43,7 @@ This request took about 2,5seconds to complete (TTFT):
 
 #### Notes
 
-Usually the chatbot returns the first token in sub 1 second timing. In this example and agent was used to yield the current time.
+Usually the chatbot returns the first token in sub 1 second timing. In this example an agent was used to yield the current time.
 
 But with both agent capabilities and the stack being local, it can be used for complete safe hardware use, like camera control or smart home integration.
 
